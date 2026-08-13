@@ -27,3 +27,6 @@ share/python-wheels/
 # Claude
 .remember/
 .superpowers/
+
+# Scratchpad
+tmp/
