@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+# fmt: off
 
 # http-security-test - HTTP security header analysis
 # Copyright (C) 2026  Mario Vilas
@@ -21,7 +22,8 @@ from unittest import mock
 
 import pytest
 
-from http_security_test import headers
+import http_security_test as headers
+from http_security_test import hsts, policies
 
 # ---------------------------------------------------------------------------
 # Per-header analyzers
@@ -564,7 +566,7 @@ class FakePreloadList:
 
 
 def preload_codes(present, host, package):
-    with mock.patch.object(headers, "hstspreload", package):
+    with mock.patch.object(hsts, "hstspreload", package):
         return [f.code for f in headers.analyze_all(present, host=host)]
 
 
@@ -617,7 +619,7 @@ def _every_code_headers_can_emit():
     codes |= {f.code for f in headers.analyze_all(REPORT_ONLY_ONLY)}
     codes |= {f.code for f in headers.analyze_all({"x-frame-options": ["DENY", "SAMEORIGIN"]})}
     # hsts-not-preloaded needs the optional preload list to be emittable at all
-    with mock.patch.object(headers, "hstspreload", FakePreloadList()):
+    with mock.patch.object(hsts, "hstspreload", FakePreloadList()):
         codes |= {
             f.code for f in headers.analyze_all(PRELOAD_CLAIM, host="example.com")
         }
@@ -720,7 +722,7 @@ def test_two_policies_that_agree_are_not_reported():
 
 def test_the_two_spellings_of_no_origins_compare_equal():
     # Feature-Policy writes it 'none'; Permissions-Policy writes it ()
-    assert headers._allowlist(["'none'".strip("'")]) == headers._allowlist([])
+    assert policies._allowlist(["'none'".strip("'")]) == policies._allowlist([])
 
 
 def test_features_only_one_header_names_are_not_a_disagreement():
