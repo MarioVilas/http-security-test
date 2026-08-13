@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "http-security-test"
+version = "0.1.0"
+description = "HTTP security header analysis"
+requires-python = ">=3.9"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Mario Vilas", email = "mvilas@gmail.com" }]
+
+[project.optional-dependencies]
+# Answers whether a domain claiming preload is on the list browsers ship. The
+# analysis runs without it and simply leaves that one claim unchecked.
+preload = ["hstspreload"]
+
+[project.urls]
+Homepage = "https://github.com/MarioVilas/http-security-test"
+
+[tool.hatch.build.targets.wheel]
+packages = ["http_security_test"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/http_security_test",
+    "/tests",
+    "/LICENSE",
+    "/pyproject.toml",
+    "/ruff.toml",
+]
