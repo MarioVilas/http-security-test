@@ -239,7 +239,7 @@ MESSAGES = {
         "policy should be stated once"
     ),
     # -- the headers with no family -----------------------------------------
-    "xfo-deprecated": (
+    "xfo-allow-from": (
         "present but uses ALLOW-FROM, which no current browser supports; a CSP "
         "frame-ancestors directive is the replacement"
     ),
@@ -258,6 +258,12 @@ MESSAGES = {
     "rp-unsafe-url": (
         "present but set to unsafe-url, which leaks the full URL, query string "
         "included, to third-party origins"
+    ),
+    "ct-no-charset": (
+        "present as {media_type} with no charset parameter, so the encoding is "
+        "whatever the browser falls back to. The injection this once enabled "
+        "needed UTF-7, which current browsers dropped, and a <meta charset> in "
+        "the document settles it just as well -- worth knowing, not a defect"
     ),
     # -- Clear-Site-Data ----------------------------------------------------
     "csd-empty": "present but names no data type, so nothing is cleared",

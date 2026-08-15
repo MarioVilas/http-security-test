@@ -18,6 +18,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import collections
+import os
+import pathlib
 from unittest import mock
 
 import pytest
@@ -108,7 +110,7 @@ ANALYZER_CASES = [
     # X-Frame-Options
     ("X-Frame-Options", "DENY", []),
     ("X-Frame-Options", "sameorigin", []),
-    ("X-Frame-Options", "ALLOW-FROM https://example.com", ["xfo-deprecated"]),
+    ("X-Frame-Options", "ALLOW-FROM https://example.com", ["xfo-allow-from"]),
     ("X-Frame-Options", "ALLOWALL", ["xfo-invalid"]),
     # X-Content-Type-Options -- not checked at all before this backport
     ("X-Content-Type-Options", "nosniff", []),
@@ -157,6 +159,21 @@ ANALYZER_CASES = [
     ("Access-Control-Allow-Origin", "https://a.test https://b.test", ["acao-multiple-origins"]),
     ("Access-Control-Allow-Origin", "https://a.test, https://b.test", ["acao-multiple-origins"]),
     ("Access-Control-Allow-Origin", "*", ["acao-wildcard"]),
+    # Content-Type. Only the charset parameter is decidable from a header that
+    # describes a body nobody here sees, and only for markup a browser parses.
+    ("Content-Type", "text/html; charset=UTF-8", []),
+    ("Content-Type", "text/html;charset=utf-8", []),
+    ("Content-Type", 'text/html; charset="utf-8"', []),
+    # the media type and the parameter name are both case-insensitive
+    ("Content-Type", "Text/HTML; CharSet=UTF-8", []),
+    ("Content-Type", "text/html", ["ct-no-charset"]),
+    ("Content-Type", "text/html; boundary=x", ["ct-no-charset"]),
+    # present but empty declares nothing
+    ("Content-Type", "text/html; charset=", ["ct-no-charset"]),
+    # JSON is UTF-8 by definition and plain text is never parsed as markup
+    ("Content-Type", "application/json", []),
+    ("Content-Type", "text/plain", []),
+    ("Content-Type", "image/png", []),
     # Clear-Site-Data. The types are quoted strings and the quotes are load
     # bearing: Chromium splits the header on commas, trims, and compares each
     # token against a constant that includes them (net/url_request/
@@ -333,7 +350,7 @@ def test_invalid_xfo_suppresses_nothing():
 
 def test_allow_from_suppresses_nothing():
     codes = framing_codes({"content-security-policy": SAFE_CSP, "x-frame-options": "ALLOW-FROM https://a.com"})
-    assert codes == ["csp-no-frame-ancestors", "xfo-deprecated"]
+    assert codes == ["csp-no-frame-ancestors", "xfo-allow-from"]
 
 
 def test_frame_ancestors_suppresses_the_missing_xfo_finding():
@@ -554,6 +571,25 @@ def test_integrity_policy_is_never_reported_missing():
     # metadata, which is a deployment commitment rather than a switch.
     assert "Integrity-Policy" not in headers.SECURITY_HEADERS
     assert not [f for f in headers.analyze_all({}) if f.code.startswith("ip-")]
+
+
+def test_an_empty_charset_parameter_declares_nothing():
+    # _charset() promises the charset or None, and "charset=" is neither a
+    # declaration nor an absence until it is made one. _analyze_ct only asks
+    # whether it is truthy, so nothing else would notice the difference.
+    from http_security_test import response
+
+    assert response._charset("text/html; charset=") is None
+    assert response._charset("text/html") is None
+    assert response._charset('text/html; charset="utf-8"') == "utf-8"
+    assert response._charset("text/html; CharSet=UTF-8") == "UTF-8"
+
+
+def test_content_type_is_never_reported_missing():
+    # analyze_all sees no status line, and a 204 or 304 carries no
+    # representation to describe, so absence decides nothing.
+    assert "Content-Type" not in headers.SECURITY_HEADERS
+    assert not [f for f in headers.analyze_all({}) if f.code.startswith("ct-")]
 
 
 def test_clear_site_data_is_never_reported_missing():
@@ -965,6 +1001,51 @@ def test_a_report_with_blobs_is_still_json_serialisable():
 # a crash or a blank in whatever renders the findings.
 
 
+SNAPSHOT = pathlib.Path(__file__).parent / "rendered_messages.txt"
+
+
+def _rendered():
+    """Every distinct sentence the package can produce, sorted.
+
+    A set, not a list: the corpus renders some codes from several cases and
+    the duplicates say nothing. Sorted so the file is a readable diff rather
+    than a churn of reordered lines.
+    """
+    rows = {
+        "%s\t%s\t%s" % (f.code, f.header, headers.describe(f))
+        for f in _every_finding_headers_can_emit()
+    }
+    return "".join(line + "\n" for line in sorted(rows))
+
+
+def test_rendered_messages_match_the_snapshot():
+    """The wording of every finding, pinned.
+
+    The catalog is one file of prose that nothing else reads, which makes an
+    accidental edit to it invisible: no analysis changes, no test about codes
+    fails, and the sentence a consumer sees is quietly different. This is the
+    check that noticed nothing when the messages moved out of the analysers --
+    275 renderings, zero drift -- and it is here so the next edit gets the same
+    treatment for free.
+
+    Regenerate deliberately, never to make a red test green:
+
+        UPDATE_MESSAGE_SNAPSHOT=1 python -m pytest tests/ -k snapshot
+
+    then read the diff before keeping it.
+    """
+    current = _rendered()
+    if os.environ.get("UPDATE_MESSAGE_SNAPSHOT"):
+        SNAPSHOT.write_text(current)
+    assert current == SNAPSHOT.read_text()
+
+
+def test_the_snapshot_covers_every_code():
+    # Without this the snapshot could pin three messages and pass forever.
+    pinned = {line.split("\t")[0] for line in SNAPSHOT.read_text().splitlines()}
+    assert pinned == set(headers.FINDING_SEVERITY)
+
+
 def test_every_emittable_code_has_a_message():
     assert _every_code_headers_can_emit() <= set(headers.MESSAGES)
 
@@ -1028,7 +1109,7 @@ def test_severity_values_match_the_documented_policy():
     # The completeness tests above check only which codes are rated. These
     # anchor what they are rated, so a flipped value cannot land silently.
     counts = collections.Counter(headers.FINDING_SEVERITY.values())
-    assert counts == {"error": 34, "warning": 27, "note": 24}
+    assert counts == {"error": 34, "warning": 27, "note": 25}
     # An explicitly-defaulted header is rated exactly as its absence is, so
     # neither spelling of the same posture reads better than the other
     assert (
@@ -1046,8 +1127,9 @@ def test_severity_values_match_the_documented_policy():
     assert headers.FINDING_SEVERITY["hsts-missing"] == "error"
     assert headers.FINDING_SEVERITY["csp-no-base-uri"] == "warning"
     assert headers.FINDING_SEVERITY["pp-missing"] == "note"
-    # ALLOW-FROM is deprecated *and* dangerous: no browser honours it
-    assert headers.FINDING_SEVERITY["xfo-deprecated"] == "error"
+    # The code names the value, not its age: ALLOW-FROM is an error because no
+    # browser honours it, which a -deprecated suffix would have understated.
+    assert headers.FINDING_SEVERITY["xfo-allow-from"] == "error"
 
 
 def test_order_findings_puts_the_worst_first():

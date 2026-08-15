@@ -1,0 +1,116 @@
+acao-credentials-wildcard	Access-Control-Allow-Origin	present as * alongside Access-Control-Allow-Credentials: true, a combination browsers refuse outright, so every credentialed cross-origin request fails
+acao-multiple-origins	Access-Control-Allow-Origin	present but lists more than one origin (https://a.test https://b.test), which the header does not allow, so browsers reject it and no cross-origin read succeeds
+acao-multiple-origins	Access-Control-Allow-Origin	present but lists more than one origin (https://a.test, https://b.test), which the header does not allow, so browsers reject it and no cross-origin read succeeds
+acao-null	Access-Control-Allow-Origin	present but set to null, which any sandboxed iframe or data: URL can send as its Origin, so any page can read the response
+acao-wildcard	Access-Control-Allow-Origin	present and set to *, so any origin may read the response; that is deliberate for public assets and a leak for anything user-specific
+coep-invalid	Cross-Origin-Embedder-Policy	present but has an unrecognised value (nonsense); expected unsafe-none, require-corp or credentialless
+coep-invalid	Cross-Origin-Embedder-Policy	present but has an unrecognised value (require-corps); expected unsafe-none, require-corp or credentialless
+coep-missing	Cross-Origin-Embedder-Policy	missing
+coep-no-isolation	Cross-Origin-Embedder-Policy	present and opting in, but Cross-Origin-Opener-Policy is not same-origin, so crossOriginIsolated stays false and the SharedArrayBuffer-class APIs remain unavailable; expected for a document meant to be embedded, since COOP is inert in a frame
+coep-ro-unenforced	Cross-Origin-Embedder-Policy-Report-Only	present but Cross-Origin-Embedder-Policy is not, so the policy is measured and never applied; nothing here blocks anything
+coep-unsafe-none	Cross-Origin-Embedder-Policy	present but set to unsafe-none, which is the default and embeds cross-origin resources without requiring them to opt in
+coop-missing	Cross-Origin-Opener-Policy	missing
+coop-ro-unenforced	Cross-Origin-Opener-Policy-Report-Only	present but Cross-Origin-Opener-Policy is not, so the policy is measured and never applied; nothing here blocks anything
+coop-unsafe-none	Cross-Origin-Opener-Policy	present but effectively unsafe-none (unsafe-none), which provides no cross-origin isolation
+coop-unsafe-none	Cross-Origin-Opener-Policy	present but effectively unsafe-none (unsafe-none; report-to="coop"), which provides no cross-origin isolation
+corp-cross-origin	Cross-Origin-Resource-Policy	present but set to cross-origin, so it keeps no ordinary embedder out; that is a deliberate opt-in for resources meant to stay loadable by cross-origin isolated pages, and not a restriction
+corp-invalid	Cross-Origin-Resource-Policy	present but has an unrecognised value (nonsense); expected same-site, same-origin or cross-origin
+corp-missing	Cross-Origin-Resource-Policy	missing
+csd-empty	Clear-Site-Data	present but names no data type, so nothing is cleared
+csd-unknown-type	Clear-Site-Data	present but "Cookies" is not a data type browsers know, and the comparison is byte-for-byte, so the member is ignored
+csd-unknown-type	Clear-Site-Data	present but "clienthints" is not a data type browsers know, and the comparison is byte-for-byte, so the member is ignored
+csd-unknown-type	Clear-Site-Data	present but "storag" is not a data type browsers know, and the comparison is byte-for-byte, so the member is ignored
+csd-unquoted	Clear-Site-Data	present but * is not quoted, and the quotes are part of the value; browsers match the type with them, so this member is skipped and whatever it names is not cleared
+csd-unquoted	Clear-Site-Data	present but cache, cookies, storage is not quoted, and the quotes are part of the value; browsers match the type with them, so this member is skipped and whatever it names is not cleared
+csd-unquoted	Clear-Site-Data	present but cookies is not quoted, and the quotes are part of the value; browsers match the type with them, so this member is skipped and whatever it names is not cleared
+csd-unquoted	Clear-Site-Data	present but storage is not quoted, and the quotes are part of the value; browsers match the type with them, so this member is skipped and whatever it names is not cleared
+csp-deprecated-directive	Content-Security-Policy	present but sets reflected-xss, which was dropped from the standard and is parsed and ignored
+csp-frame-ancestors-wildcard	Content-Security-Policy	present but sets frame-ancestors to *, so the page can be framed by any origin, exactly as if the directive were absent
+csp-http-source	Content-Security-Policy	present but allows http://cdn.example.com over plaintext HTTP, which anyone on the path can replace
+csp-invalid-keyword	Content-Security-Policy	present but lists 'unsafe-inlien', which is read as a hostname rather than the keyword it resembles
+csp-invalid-keyword	Content-Security-Policy	present but lists nonce-abc, which is read as a hostname rather than the keyword it resembles
+csp-invalid-keyword	Content-Security-Policy	present but lists self, which is read as a hostname rather than the keyword it resembles
+csp-ip-source	Content-Security-Policy	present but allows the IP address 127.0.0.1, which browsers do not match against and which usually means a development entry reached production
+csp-missing	Content-Security-Policy	missing
+csp-missing-semicolon	Content-Security-Policy	present but lists object-src as a source value, so a semicolon is missing and that directive is not in force at all
+csp-no-base-uri	Content-Security-Policy	present but sets no base-uri directive, so an injected <base> tag can redirect every relative URL on the page
+csp-no-default-src	Content-Security-Policy	present but sets neither default-src nor script-src, so script loading is left unrestricted
+csp-no-frame-ancestors	Content-Security-Policy	present but sets no frame-ancestors directive, so the page can be framed by any origin
+csp-no-object-src	Content-Security-Policy	present but sets neither object-src nor default-src, so plugin content is left unrestricted
+csp-nonce-weak	Content-Security-Policy	present but its nonce 'nonce-abc' is guessable: nonces need at least 8 base64 characters and a fresh value per response
+csp-nonce-weak	Content-Security-Policy	present but its nonce 'nonce-sh0rt!!' is guessable: nonces need at least 8 base64 characters and a fresh value per response
+csp-plain-scheme	Content-Security-Policy	present but allows the bare scheme https: in script-src, so anything served over it counts as an allowed source: every host on the web for http: and https:, any attacker-authored payload for data:
+csp-ro-unenforced	Content-Security-Policy-Report-Only	present but Content-Security-Policy is not, so the policy is measured and never applied; nothing here blocks anything
+csp-unknown-directive	Content-Security-Policy	present but sets scritp-src, which no browser recognises, so that part of the policy does nothing
+csp-unsafe-eval	Content-Security-Policy	present but allows unsafe-eval in script-src, permitting strings to be executed as code
+csp-unsafe-inline	Content-Security-Policy	present but allows unsafe-inline in default-src, defeating most of the cross-site scripting protection a policy provides
+csp-unsafe-inline	Content-Security-Policy	present but allows unsafe-inline in script-src, defeating most of the cross-site scripting protection a policy provides
+csp-unsafe-inline	Content-Security-Policy	present but allows unsafe-inline in script-src-attr, defeating most of the cross-site scripting protection a policy provides
+csp-unsafe-inline	Content-Security-Policy	present but allows unsafe-inline in script-src-elem, defeating most of the cross-site scripting protection a policy provides
+csp-unsafe-inline-style	Content-Security-Policy	present but allows unsafe-inline in default-src, so injected CSS can redress the interface and, where the policy allows an outbound source, read page data through selector-driven requests; it cannot run script
+csp-unsafe-inline-style	Content-Security-Policy	present but allows unsafe-inline in style-src, so injected CSS can redress the interface and, where the policy allows an outbound source, read page data through selector-driven requests; it cannot run script
+csp-unsafe-inline-style	Content-Security-Policy	present but allows unsafe-inline in style-src-elem, so injected CSS can redress the interface and, where the policy allows an outbound source, read page data through selector-driven requests; it cannot run script
+csp-wildcard	Content-Security-Policy	present but uses a wildcard source (*) in default-src, allowing content from any origin
+ct-no-charset	Content-Type	present as text/html with no charset parameter, so the encoding is whatever the browser falls back to. The injection this once enabled needed UTF-7, which current browsers dropped, and a <meta charset> in the document settles it just as well -- worth knowing, not a defect
+duplicate-headers	x-frame-options	sent more than once, which no specification defines: clients differ on which value wins, so the response does not mean one thing
+ect-deprecated	Expect-CT	present but deprecated since June 2021
+fp-conflicts	Feature-Policy	present alongside Permissions-Policy, and the two disagree about geolocation; which one applies is an implementation detail, so the policy should be stated once
+fp-deprecated	Feature-Policy	present but superseded by Permissions-Policy, which uses a different syntax; only Chromium still honours this header
+fp-empty	Feature-Policy	present but sets no feature, so it restricts nothing
+fp-wildcard	Feature-Policy	present but allows geolocation in every origin (*), including third party frames the page embeds
+hpkp-deprecated	Public-Key-Pins	present but every browser has removed key pinning, so the pins bind nothing; it was withdrawn because a mistake could lock users out of a site for the lifetime of the policy
+hpkp-ro-deprecated	Public-Key-Pins-Report-Only	present but every browser has removed key pinning, so nothing is measured and nothing is reported
+hsts-malformed	Strict-Transport-Security	present but its max-age is not a number (abc), so browsers ignore the policy entirely
+hsts-malformed	Strict-Transport-Security	present but specifies no max-age, so browsers ignore the policy entirely
+hsts-max-age-short	Strict-Transport-Security	present but its max-age is only 86400 seconds, below the recommended minimum of 15552000 (six months)
+hsts-max-age-zero	Strict-Transport-Security	present but set to max-age=0, which tells browsers to forget the policy and permits plaintext connections again
+hsts-missing	Strict-Transport-Security	missing
+hsts-no-include-subdomains	Strict-Transport-Security	present but does not set includeSubDomains, leaving subdomains reachable over plaintext HTTP
+hsts-not-preloaded	Strict-Transport-Security	present with preload, but example.com is not on the list browsers ship, so the very first visit is still unprotected
+hsts-preload-ineffective	Strict-Transport-Security	present with preload, but the preload list requires a max-age of at least 31536000 (one year) rather than 15768000, so the domain would not be accepted
+hsts-preload-ineffective	Strict-Transport-Security	present with preload, but the preload list requires includeSubDomains and a max-age of at least 31536000 (one year) rather than 15552000, so the domain would not be accepted
+hsts-preload-ineffective	Strict-Transport-Security	present with preload, but the preload list requires includeSubDomains, so the domain would not be accepted
+ip-endpoints-undefined	Integrity-Policy	present and reports to sri, which no Reporting-Endpoints header defines, so violations are caught and never delivered
+ip-invalid	Integrity-Policy	present but is not a dictionary of inner lists (blocked-destinations=("script")); browsers parse the header whole or not at all, so nothing is enforced. The items of a list are separated by spaces, not commas, and are bare tokens rather than quoted strings
+ip-invalid	Integrity-Policy	present but is not a dictionary of inner lists (blocked-destinations=('script')); browsers parse the header whole or not at all, so nothing is enforced. The items of a list are separated by spaces, not commas, and are bare tokens rather than quoted strings
+ip-invalid	Integrity-Policy	present but is not a dictionary of inner lists (blocked-destinations=(script), sources=(invalid); browsers parse the header whole or not at all, so nothing is enforced. The items of a list are separated by spaces, not commas, and are bare tokens rather than quoted strings
+ip-invalid	Integrity-Policy	present but is not a dictionary of inner lists (blocked-destinations=(script); browsers parse the header whole or not at all, so nothing is enforced. The items of a list are separated by spaces, not commas, and are bare tokens rather than quoted strings
+ip-invalid	Integrity-Policy	present but is not a dictionary of inner lists (blocked-destinations=(script,style)); browsers parse the header whole or not at all, so nothing is enforced. The items of a list are separated by spaces, not commas, and are bare tokens rather than quoted strings
+ip-invalid	Integrity-Policy	present but is not a dictionary of inner lists (blocked-destinations=script); browsers parse the header whole or not at all, so nothing is enforced. The items of a list are separated by spaces, not commas, and are bare tokens rather than quoted strings
+ip-no-blocked-destinations	Integrity-Policy	present but names no destination to block, so every script and stylesheet still loads without integrity metadata
+ip-no-blocked-destinations	Integrity-Policy	present but names only scripts, which no engine blocks on, so every script and stylesheet still loads without integrity metadata
+ip-no-blocked-destinations	Integrity-Policy	present but names only style, which no engine blocks on, so every script and stylesheet still loads without integrity metadata
+ip-ro-unenforced	Integrity-Policy-Report-Only	present but Integrity-Policy is not, so the policy is measured and never applied; nothing here blocks anything
+ip-sources-without-inline	Integrity-Policy	present but sources is set to () and does not include inline, and the browser supplies that default only when the directive is absent, so the policy enforces nothing despite naming a destination
+ip-sources-without-inline	Integrity-Policy	present but sources is set to (telepathy) and does not include inline, and the browser supplies that default only when the directive is absent, so the policy enforces nothing despite naming a destination
+ip-style-unsupported	Integrity-Policy	present and asks for style, which no engine implements yet -- Firefox only behind a preference; the script destination beside it is unaffected
+ip-unknown-destination	Integrity-Policy	present but blocked-destinations names scripts, which is not a request destination the policy defines, so that entry is ignored
+p3p-deprecated	P3P	present but P3P was only ever read by Internet Explorer, which is retired, and the specification was abandoned
+pp-empty	Permissions-Policy	present but sets no feature, so it restricts nothing
+pp-invalid	Permissions-Policy	present but camera is not a feature=allowlist pair, so browsers ignore the whole header
+pp-legacy-syntax	Permissions-Policy	present but written in the older Feature-Policy syntax (geolocation 'self'; camera 'none'), which browsers cannot parse, so the whole header is ignored
+pp-missing	Permissions-Policy	missing
+pp-wildcard	Permissions-Policy	present but allows fullscreen in every origin (*), including third party frames the page embeds
+pp-wildcard	Permissions-Policy	present but allows geolocation in every origin (*), including third party frames the page embeds
+rp-invalid	Referrer-Policy	present but carries no recognised policy token (), so the browser default applies instead
+rp-invalid	Referrer-Policy	present but carries no recognised policy token (bogus,), so the browser default applies instead
+rp-invalid	Referrer-Policy	present but carries no recognised policy token (nonsense), so the browser default applies instead
+rp-missing	Referrer-Policy	missing
+rp-unsafe-url	Referrer-Policy	present but set to unsafe-url, which leaks the full URL, query string included, to third-party origins
+xcsp-deprecated	X-Content-Security-Policy	present but no browser has read this header since Firefox 23; if it is the only policy sent, the page has none
+xcto-invalid	X-Content-Type-Options	present but set to sniff rather than nosniff, so MIME type sniffing stays enabled
+xcto-missing	X-Content-Type-Options	missing
+xdo-deprecated	X-Download-Options	present but only Internet Explorer read it, to stop a download being opened in the site's own origin; no current browser does
+xdpc-nonstandard	X-DNS-Prefetch-Control	present but no specification defines it: browser testing finds DNS prefetching is a Chromium behaviour and that only Chrome acts on the header, so this is a Chrome-only measure rather than a policy other engines can be expected to honour
+xfo-allow-from	X-Frame-Options	present but uses ALLOW-FROM, which no current browser supports; a CSP frame-ancestors directive is the replacement
+xfo-invalid	X-Frame-Options	present but has an unrecognised value (ALLOWALL), so browsers ignore it and the page stays framable
+xfo-missing	X-Frame-Options	missing
+xpcdp-all	X-Permitted-Cross-Domain-Policies	present but set to all, so any file on the server can serve as a cross-domain policy, including whatever a user can upload
+xpcdp-deprecated	X-Permitted-Cross-Domain-Policies	present but permits no cross-domain policy file, which is the restrictive setting; only Flash and Acrobat clients ever read it
+xpcdp-invalid	X-Permitted-Cross-Domain-Policies	present but has an unrecognised value (nonsense), so clients fall back to their default policy
+xpcdp-policy-file	X-Permitted-Cross-Domain-Policies	present and set to master-only, which leaves cross-domain access to the policy file; check crossdomain.xml
+xwkcsp-deprecated	X-WebKit-CSP	present but no browser has read this header since Chrome 25; if it is the only policy sent, the page has none
+xxp-blocked	X-XSS-Protection	present and enabled in blocked mode, which may lead to side channel attacks on iframe embeddable websites
+xxp-deprecated	X-XSS-Protection	present but disabled
+xxp-enabled	X-XSS-Protection	present and enabled, which in some cases can create XSS vulnerabilities in otherwise safe websites
+xxp-invalid	X-XSS-Protection	present but has an unrecognised value (2), expected '0', '1' or '1; mode=block'

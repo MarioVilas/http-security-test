@@ -246,6 +246,14 @@ INFORMATION_HEADERS = (
 # quotes baked into it -- kDatatypeCookies is `"\"cookies\""`, not `"cookies"`.
 # So the quotes are part of the value and the comparison is byte-for-byte.
 #
+# Evidence, and its limit: that tokenizer was read directly (net/url_request/
+# clear_site_data.cc -- ClearSiteDataHeaderContents is a bare comma split, and
+# kDatatypeCookies is the literal "\"cookies\""), so csd-unquoted is rated error
+# on one engine's source rather than on all three. Firefox and Safari are
+# inferred from the grammar in the specification, which is `1#( quoted-string )`
+# and agrees, but was not tested. If a cross-browser suite for this appears --
+# the way wpt has one for Integrity-Policy -- prefer it to both.
+#
 # executionContexts is in the specification and in OWASP's table but not in
 # Chromium's list; it is accepted here anyway, because a site following the spec
 # has done nothing wrong and this table decides only what is *recognisable*.
@@ -331,6 +339,13 @@ def parse_integrity_policy(value):
     return policy
 
 
+# The media types where declaring a charset decides anything. Only markup a
+# browser parses is affected, and only text/html is parsed as markup: JSON is
+# UTF-8 by definition and the parameter is meaningless on it, and text/plain is
+# never parsed as markup in the first place.
+CT_CHARSET_TYPES = frozenset(["text/html"])
+
+
 # Cache control headers.
 CACHE_HEADERS = (
     "Cache-Control",
@@ -344,7 +359,7 @@ CACHE_HEADERS = (
 def _analyze_xfo(value):
     normalized = value.strip().upper()
     if normalized.startswith("ALLOW-FROM"):
-        return [Finding("X-Frame-Options", "xfo-deprecated")]
+        return [Finding("X-Frame-Options", "xfo-allow-from")]
     if normalized not in ("DENY", "SAMEORIGIN"):
         return [Finding("X-Frame-Options", "xfo-invalid", {"value": value.strip()})]
     return []
@@ -374,6 +389,42 @@ def _analyze_rp(value):
     if effective == "unsafe-url":
         return [Finding("Referrer-Policy", "rp-unsafe-url")]
     return []
+
+
+def _media_type(value):
+    return value.split(";")[0].strip().lower()
+
+
+def _charset(value):
+    """The charset parameter, or None when the header declares no encoding.
+
+    A parameter present but empty declares nothing, so it answers None too.
+    """
+    for chunk in value.split(";")[1:]:
+        name, sep, charset = chunk.partition("=")
+        if sep and name.strip().lower() == "charset":
+            return charset.strip().strip('"') or None
+    return None
+
+
+def _analyze_ct(value):
+    """Findings for Content-Type.
+
+    A representation header, describing a body this package never sees, so
+    almost nothing about it is decidable here -- whether the type is *right* is
+    a question about the bytes. The charset parameter is the exception: whether
+    the response declares its encoding is visible in the header itself.
+
+    Only text/html is asked. Everywhere else the parameter is either defined
+    away (application/json is UTF-8 by definition) or decides nothing, and
+    absence of the header is not reported at all: analyze_all sees no status
+    line, and a 204 or 304 carries no representation to describe.
+    """
+    if _media_type(value) not in CT_CHARSET_TYPES or _charset(value):
+        return []
+    return [
+        Finding("Content-Type", "ct-no-charset", {"media_type": _media_type(value)})
+    ]
 
 
 def _analyze_csd(value):
@@ -460,6 +511,7 @@ def _analyze_ip(value):
 _ANALYZERS = {
     "clear-site-data": _analyze_csd,
     "content-security-policy": _analyze_csp,
+    "content-type": _analyze_ct,
     "cross-origin-embedder-policy": _analyze_coep,
     "cross-origin-opener-policy": _analyze_coop,
     "cross-origin-resource-policy": _analyze_corp,

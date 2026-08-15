@@ -85,10 +85,12 @@ These were expensive to arrive at. Do not quietly reverse them.
 6. **What a non-enforcing header permits decides nothing.** Report-only content
    is never analyzed; Feature-Policy's content is ignored once Permissions-Policy
    is present; `coep-missing` is excused unless COOP asks for isolation.
-7. **Code naming.** `<prefix>-deprecated` means "present, legacy, no defect".
-   Known exception: `xfo-deprecated` (ALLOW-FROM) is rated `error` — a real
-   defect. Renaming it to `xfo-allow-from` is still open and free until the codes
-   have consumers. The table and the code name are independent: membership of
+7. **Code naming.** `<prefix>-deprecated` means "present, legacy, no defect",
+   and there is no longer an exception: `xfo-deprecated` was renamed
+   `xfo-allow-from` once the schema made codes an external contract, because it
+   is rated `error` and a `-deprecated` suffix understated a value no browser
+   honours. A code names the defect, not the age of the thing. The table and the
+   code name are independent: membership of
    `DEPRECATED_HEADERS` says "do not reach for this", the suffix says what is
    wrong with it. `xdpc-nonstandard` is in that table without a `-deprecated`
    code because X-DNS-Prefetch-Control was never standardised in the first
@@ -229,7 +231,19 @@ suppression applies.
   with a constructed response; check browser support against the local caniuse
   checkout; check a "this is unused" hunch by grepping call sites.
 - **Mutation-test new guards.** Break the code, confirm the test fails, restore.
-  A test that passes both ways is worse than none.
+  A test that passes both ways is worse than none. This has paid for itself
+  twice; most recently a guard returning `None` instead of `""` survived every
+  mutation because the only caller tested truthiness, which is dead code
+  pretending to be a decision.
+- **The wording is pinned too.** `tests/rendered_messages.txt` holds every
+  distinct sentence the package can produce, and a companion test asserts it
+  covers every rated code so it cannot pass vacuously. `catalog.py` is prose
+  nothing else reads, so an accidental edit there changes what a consumer sees
+  while every other test stays green. Regenerate deliberately and read the diff:
+
+  ```sh
+  UPDATE_MESSAGE_SNAPSHOT=1 python -m pytest tests/ -k snapshot
+  ```
 - **Refactors get behavioural equivalence checks.** `git show HEAD:<file>` into
   `/tmp`, run a corpus through old and new, diff the `(header, code)` sets. Both
   module splits were verified this way at 335 and 168 cases, zero mismatches.
@@ -262,6 +276,18 @@ suppression applies.
 - `HSTS_MIN_MAX_AGE = 15552000` (180 days), chosen over the 6-month figure because
   Shodan shows 180 days is what sites actually send.
 - `info` was renamed `note` throughout, including theme keys, to match SARIF.
+- **From the OWASP cheat sheet, and settled — do not re-propose from it:**
+  `X-Robots-Tag` is inventory at most, never a finding (not browser-enforced,
+  and whether you want `noindex` depends on content nobody here sees); the
+  secure-download `Content-Disposition` advice needs to know the resource is
+  user-supplied, which headers cannot say; and the FLoC section
+  (`interest-cohort=()`) is stale — Google cancelled FLoC in 2022.
+- **`Content-Type` is analysed for exactly one thing**, the charset parameter on
+  `text/html`, rated `note`. Real-world impact is negligible now (the injection
+  needed UTF-7, and `<meta charset>` satisfies it invisibly), but tools still
+  flag it, so the fact is reported without the noise a warning would make.
+  Absence of the header is not reported at all: `analyze_all` sees no status
+  line and a 204 or 304 carries no representation.
 - **`X-DNS-Prefetch-Control` is inventoried, never a gap.** It is in
   `DEPRECATED_HEADERS` and emits one `note`, `xdpc-nonstandard`. No finding can
   do better: OWASP's own browser testing (their issue #201) found DNS
@@ -318,6 +344,14 @@ suppression applies.
   rather than only known-interesting names. The human wants to compile their own
   list, behind its own switch.
 - **`request.py`** — request parsing/analysis, sharing `message.py`.
+- **The schema is not finished.** The shape in "The output schema" is settled;
+  what surrounds it is not. Open: a version field (needed *because* the `raw`
+  blobs invite archiving reports — a stored report from today and one from a
+  later shape are indistinguishable, and this is cheap now and awkward once
+  reports exist); how several results travel together, which the old tool did by
+  keying on URL and which should not come back that way; and whether run
+  metadata — tool name and version — belongs in the document at all. Decide
+  these together, before release, since all three change the top level.
 
 ## Reference material on disk
 
@@ -339,6 +373,7 @@ Read for ideas and reference, never copy.
 
 ## Status
 
-85 codes (34 error / 27 warning / 24 note), each with a rating and a message
-template. 255 tests, 107 test functions, all passing; `ruff check` clean. `pyproject.toml` is a placeholder — hatchling, no
+86 codes (34 error / 27 warning / 25 note), each with a rating and a message
+template, and every rendered sentence pinned by a snapshot. 269 tests, 111 test
+functions, all passing; `ruff check` clean. `pyproject.toml` is a placeholder — hatchling, no
 README yet, `hstspreload` declared as the optional `[preload]` extra.
