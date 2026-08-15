@@ -277,15 +277,17 @@ def test_inline_findings_name_the_directive_actually_consulted():
     inherited = headers.analyze(
         "Content-Security-Policy", "default-src 'unsafe-inline'; base-uri 'none'"
     )
-    message = next(f.message for f in inherited if f.code == "csp-unsafe-inline")
-    assert "in default-src" in message
+    finding = next(f for f in inherited if f.code == "csp-unsafe-inline")
+    assert finding.data == {"directives": ["default-src"]}
+    assert "in default-src" in headers.describe(finding)
 
     overridden = headers.analyze(
         "Content-Security-Policy",
         "default-src 'none'; script-src 'self'; script-src-elem 'unsafe-inline'",
     )
-    message = next(f.message for f in overridden if f.code == "csp-unsafe-inline")
-    assert "in script-src-elem" in message
+    finding = next(f for f in overridden if f.code == "csp-unsafe-inline")
+    assert finding.data == {"directives": ["script-src-elem"]}
+    assert "in script-src-elem" in headers.describe(finding)
 
 
 def test_preload_message_reads_cleanly_when_both_requirements_are_unmet():
@@ -294,13 +296,16 @@ def test_preload_message_reads_cleanly_when_both_requirements_are_unmet():
         for f in headers.analyze("Strict-Transport-Security", "max-age=300; preload")
         if f.code == "hsts-preload-ineffective"
     )
-    assert "requires includeSubDomains and a max-age of at least" in finding.message
+    assert finding.data["unmet"] == ["include-subdomains", "max-age"]
+    assert "requires includeSubDomains and a max-age of at least" in headers.describe(
+        finding
+    )
 
 
 def test_findings_name_their_header():
     findings = headers.analyze("Strict-Transport-Security", "max-age=1")
     assert all(f.header == "Strict-Transport-Security" for f in findings)
-    assert all(f.message for f in findings)
+    assert all(headers.describe(f) for f in findings)
 
 
 # ---------------------------------------------------------------------------
@@ -379,7 +384,8 @@ def test_a_present_hsts_header_is_still_analyzed_on_a_plaintext_response():
 def test_a_finding_quotes_the_whole_value_it_was_sent():
     # the parameter is stripped to decide, not to report: the operator sent it
     finding, = headers.analyze("Cross-Origin-Opener-Policy", 'unsafe-none; report-to="coop"')
-    assert 'unsafe-none; report-to="coop"' in finding.message
+    assert finding.data == {"value": 'unsafe-none; report-to="coop"'}
+    assert 'unsafe-none; report-to="coop"' in headers.describe(finding)
 
 
 def test_missing_findings_are_ordered_the_same_on_every_run():
@@ -475,8 +481,12 @@ RESPONSE = {
 }
 
 
-def test_find_information_headers_returns_canonical_names_and_values():
-    assert headers.find_information_headers(RESPONSE) == {"Server": "nginx/1.18"}
+def test_inventory_returns_canonical_names_and_values():
+    found = headers.inventory(RESPONSE)
+    assert found["information"] == {"Server": "nginx/1.18"}
+    assert found["caching"] == {"Cache-Control": "no-store"}
+    assert found["deprecated"] == {"X-XSS-Protection": "0"}
+    assert found["security"] == {"X-Frame-Options": "DENY"}
 
 
 def test_stack_fingerprinting_headers_are_inventoried():
@@ -487,7 +497,7 @@ def test_stack_fingerprinting_headers_are_inventoried():
         "$wsep": "",
         "x-powered-by": "PHP/8.2",
     }
-    found = headers.find_information_headers(response)
+    found = headers.inventory(response)["information"]
     assert set(found) == {"$WSEP", "X-Drupal-Cache", "X-Generator", "X-Powered-By", "X-Runtime"}
     # inventoried, never judged: only a human can say whether a value is a leak
     assert headers.analyze("X-Generator", "Drupal 10") == []
@@ -505,7 +515,7 @@ def test_mesh_and_tracing_headers_are_inventoried_too():
         "x-nextjs-matched-path": "/blog/[slug]",
         "x-dtagentid": "abc",
     }
-    found = headers.find_information_headers(response)
+    found = headers.inventory(response)["information"]
     assert set(found) == {
         "X-B3-TraceId",
         "X-Datadog-Parent-Id",
@@ -535,7 +545,7 @@ def test_x_dns_prefetch_control_is_inventoried_as_one_to_drop():
     # It sits in the deprecated table without a -deprecated code: never
     # standardised is not the same as withdrawn, and the note says which.
     assert "X-DNS-Prefetch-Control" in headers.DEPRECATED_HEADERS
-    found = headers.find_deprecated_headers({"x-dns-prefetch-control": "off"})
+    found = headers.inventory({"x-dns-prefetch-control": "off"})["deprecated"]
     assert found == {"X-DNS-Prefetch-Control": "off"}
 
 
@@ -553,12 +563,24 @@ def test_clear_site_data_is_never_reported_missing():
     assert not [f for f in headers.analyze_all({}) if f.code.startswith("csd-")]
 
 
-def test_find_cache_headers_returns_canonical_names_and_values():
-    assert headers.find_cache_headers(RESPONSE) == {"Cache-Control": "no-store"}
+def test_the_missing_inventory_is_a_fact_not_a_judgment():
+    # HSTS is absent over plaintext and the inventory says so; the *finding* is
+    # what secure=False suppresses. Deriving one from the other loses this.
+    absent = headers.inventory({})["missing"]
+    assert "Strict-Transport-Security" in absent
+    assert absent == list(headers.SECURITY_HEADERS)
+    reported = {f.code for f in headers.analyze_all({}, secure=False)}
+    assert "hsts-missing" not in reported
 
 
-def test_find_deprecated_headers_returns_canonical_names_and_values():
-    assert headers.find_deprecated_headers(RESPONSE) == {"X-XSS-Protection": "0"}
+def test_inventories_never_judge_what_they_list():
+    # These two tables exist precisely because no finding can be made from
+    # them: only a human can say whether a given banner is a leak.
+    noisy = {n.lower(): "x" for n in headers.INFORMATION_HEADERS + headers.CACHE_HEADERS}
+    assert {f.code for f in headers.analyze_all(noisy)} == {
+        f.code for f in headers.analyze_all({})
+    }
+    assert len(headers.inventory(noisy)["information"]) == len(headers.INFORMATION_HEADERS)
 
 
 def test_the_header_tables_do_not_overlap():
@@ -734,6 +756,34 @@ def test_membership_is_unchecked_when_the_caller_gives_no_host():
 # to the default. The corpus above is what makes that checkable.
 
 
+def _every_finding_headers_can_emit():
+    """Every finding the corpus can produce, not just its code.
+
+    The severity tests only need the codes, but the catalog tests need the
+    findings themselves: a template that names a field the data does not carry
+    is only discoverable by rendering one.
+    """
+    return [f for f in _emitted()]
+
+
+def _emitted():
+    for name, value, _ in ANALYZER_CASES:
+        yield from headers.analyze(name, value)
+    for present in (
+        {},
+        BOTH,
+        WILDCARD_WITH_CREDENTIALS,
+        REPORT_ONLY_ONLY,
+        REPORTS_NOWHERE,
+        {"x-frame-options": ["DENY", "SAMEORIGIN"]},
+    ):
+        yield from headers.analyze_all(present)
+    for present, _ in ISOLATION_CASES:
+        yield from headers.analyze_all(present)
+    with mock.patch.object(hsts, "hstspreload", FakePreloadList()):
+        yield from headers.analyze_all(PRELOAD_CLAIM, host="example.com")
+
+
 def _every_code_headers_can_emit():
     codes = {f.code for name, value, _ in ANALYZER_CASES for f in headers.analyze(name, value)}
     codes |= {f.code for f in headers.analyze_all({})}
@@ -766,6 +816,207 @@ def test_every_finding_code_has_a_severity():
 
 def test_no_severity_is_mapped_for_a_code_that_cannot_be_emitted():
     assert set(headers.FINDING_SEVERITY) <= _every_code_headers_can_emit()
+
+
+# ---------------------------------------------------------------------------
+# The report schema
+# ---------------------------------------------------------------------------
+# report() is the whole analysis as plain data: a list of findings and the
+# inventories. Findings are a list rather than codes grouped under a severity,
+# because a code is no longer unique within a response -- duplicate-headers
+# names several headers today, and per-cookie findings will repeat within one.
+
+
+def test_report_is_json_serialisable_with_no_encoder():
+    import json
+
+    encoded = json.dumps(headers.report(RESPONSE))
+    assert json.loads(encoded) == headers.report(RESPONSE)
+
+
+def test_the_two_sides_are_nested_so_a_header_name_is_never_ambiguous():
+    # Cache-Control is both a request and a response header, so once requests
+    # are analysed a bare "header" field could not say which one it meant.
+    out = headers.report(RESPONSE)
+    assert set(out) == {"response"}
+    assert set(out["response"]) == {"findings", "inventory"}
+
+
+def test_a_finding_row_carries_its_level_and_data():
+    row, = [
+        r
+        for r in headers.report({"x-frame-options": "ALLOWALL"})["response"]["findings"]
+        if r["code"] == "xfo-invalid"
+    ]
+    assert row == {
+        "header": "X-Frame-Options",
+        "code": "xfo-invalid",
+        "level": "error",
+        "data": {"value": "ALLOWALL"},
+        "message": headers.describe(headers.Finding(
+            "X-Frame-Options", "xfo-invalid", {"value": "ALLOWALL"}
+        )),
+    }
+
+
+def test_data_is_always_present_even_when_empty():
+    # so a consumer never has to test for the key
+    rows = headers.report({})["response"]["findings"]
+    assert all("data" in row for row in rows)
+    assert all(row["data"] == {} for row in rows if row["code"].endswith("-missing"))
+
+
+def test_the_message_can_be_left_out_entirely():
+    rows = headers.report(RESPONSE, message=False)["response"]["findings"]
+    assert rows
+    assert all("message" not in row for row in rows)
+    assert all(row["data"] is not None for row in rows)
+
+
+def test_findings_come_out_worst_first():
+    levels = [
+        r["level"]
+        for r in headers.report({"x-frame-options": "ALLOWALL"})["response"]["findings"]
+    ]
+    assert levels == sorted(levels, key=headers.SEVERITIES.index)
+
+
+def test_one_code_may_appear_twice_in_a_report():
+    # the shape the old severity-keyed schema could not express
+    rows = headers.report({"x-frame-options": ["ALLOWALL", "NONSENSE"]})["response"]["findings"]
+    invalid = [r for r in rows if r["code"] == "xfo-invalid"]
+    assert [r["data"]["value"] for r in invalid] == ["ALLOWALL", "NONSENSE"]
+
+
+def test_the_report_carries_all_four_inventories():
+    assert set(headers.report(RESPONSE)["response"]["inventory"]) == {
+        "security",
+        "missing",
+        "deprecated",
+        "information",
+        "caching",
+    }
+
+
+# ---------------------------------------------------------------------------
+# The raw blobs
+# ---------------------------------------------------------------------------
+# Optional passthrough: this package never fetches anything. They are here so a
+# report is reproducible -- the bytes that produced the findings travel with
+# them and a later version can be run over the same input.
+
+RAW_RESPONSE = b"HTTP/1.1 200 OK\r\nServer: caf\xe9-server/1.0\r\nX-Frame-Options: ALLOWALL\r\n\r\nbody \xff"
+RAW_REQUEST = b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n"
+
+
+def test_a_report_without_blobs_has_neither_key():
+    out = headers.report(RESPONSE)
+    assert "raw" not in out["response"]
+    assert "request" not in out
+
+
+def test_the_response_blob_round_trips_to_the_same_bytes():
+    import base64
+
+    out = headers.report(headers.parse_raw_headers(RAW_RESPONSE), raw=RAW_RESPONSE)
+    assert base64.b64decode(out["response"]["raw"]) == RAW_RESPONSE
+
+
+def test_the_blob_stays_analysable_so_a_report_is_reproducible():
+    import base64
+
+    out = headers.report(headers.parse_raw_headers(RAW_RESPONSE), raw=RAW_RESPONSE)
+    again = headers.parse_raw_headers(base64.b64decode(out["response"]["raw"]))
+    assert [r["code"] for r in out["response"]["findings"]] == [
+        f.code for f in headers.order_findings(headers.analyze_all(again))
+    ]
+
+
+def test_text_is_encoded_the_way_parse_raw_headers_decodes_it():
+    # latin-1 both ways, so a value that came out of parse_raw_headers goes
+    # back in unchanged -- utf-8 here would corrupt the caf\xe9 banner
+    import base64
+
+    as_text = RAW_RESPONSE.decode("latin-1")
+    out = headers.report({}, raw=as_text)
+    assert base64.b64decode(out["response"]["raw"]) == RAW_RESPONSE
+
+
+def test_a_request_blob_gets_its_own_key():
+    out = headers.report(RESPONSE, request_raw=RAW_REQUEST)
+    assert set(out) == {"response", "request"}
+    assert set(out["request"]) == {"raw"}
+    assert "findings" not in out["request"]
+
+
+def test_a_report_with_blobs_is_still_json_serialisable():
+    import json
+
+    out = headers.report(RESPONSE, raw=RAW_RESPONSE, request_raw=RAW_REQUEST)
+    assert json.loads(json.dumps(out)) == out
+
+
+# ---------------------------------------------------------------------------
+# The message catalog
+# ---------------------------------------------------------------------------
+# The analysers hold no prose: they emit (header, code, data) and catalog.py
+# turns that into a sentence. Three things can go wrong, and each is pinned
+# here, because none of them shows up as a failing analysis -- they show up as
+# a crash or a blank in whatever renders the findings.
+
+
+def test_every_emittable_code_has_a_message():
+    assert _every_code_headers_can_emit() <= set(headers.MESSAGES)
+
+
+def test_no_message_is_written_for_a_code_that_cannot_be_emitted():
+    assert set(headers.MESSAGES) <= _every_code_headers_can_emit()
+
+
+def test_every_finding_renders_without_a_missing_field():
+    # The failure this catches: a template naming {sources} beside data that
+    # carries "directives". Nothing else notices until a consumer asks for the
+    # sentence, which may be long after the analysis was trusted.
+    for finding in _every_finding_headers_can_emit():
+        rendered = headers.describe(finding)
+        assert rendered
+        assert "{" not in rendered
+
+
+def test_no_analyser_builds_a_sentence():
+    """The point of the split, stated as the thing that would undo it.
+
+    Prose in a comment or a docstring is ordinary English and welcome; what
+    must not come back is a sentence passed to Finding(), because that is the
+    coupling the catalog exists to remove. So this reads the syntax rather than
+    the text: the third argument to Finding() is data, and data is never a
+    string and never a string being formatted.
+    """
+    import ast
+    import pathlib
+
+    import http_security_test
+
+    root = pathlib.Path(http_security_test.__file__).parent
+    offenders = []
+    for module in sorted(root.glob("*.py")):
+        for node in ast.walk(ast.parse(module.read_text())):
+            if not (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "Finding"):
+                continue
+            if len(node.args) < 3:
+                continue
+            if isinstance(node.args[2], (ast.Constant, ast.BinOp, ast.JoinedStr)):
+                offenders.append("%s:%d" % (module.name, node.lineno))
+    assert offenders == []
+
+
+def test_data_is_the_machine_readable_half():
+    finding, = headers.analyze("X-Frame-Options", "ALLOWALL")
+    assert finding.data == {"value": "ALLOWALL"}
+    # ...and the sentence is built from exactly that, not from a second copy
+    assert headers.describe(finding) == headers.MESSAGES["xfo-invalid"].format(
+        value="ALLOWALL"
+    )
 
 
 def test_unknown_codes_fall_back_to_warning():
@@ -1041,8 +1292,20 @@ def test_one_policy_is_still_judged_alone():
     assert csp_codes("default-src 'self'") == ["csp-no-base-uri", "csp-no-frame-ancestors"]
 
 
-def test_a_repeated_header_never_names_a_defect_twice():
-    codes = [f.code for f in headers.analyze_all({"x-frame-options": ["ALLOWALL", "NONSENSE"]})]
+def test_a_repeated_header_names_each_distinct_defect():
+    # Identity is (header, code, data), so two bad values are two facts. It was
+    # (header, code) while a finding carried prose, which collapsed these into
+    # one -- and would collapse two cookies missing Secure into one as well.
+    findings = [
+        f
+        for f in headers.analyze_all({"x-frame-options": ["ALLOWALL", "NONSENSE"]})
+        if f.code == "xfo-invalid"
+    ]
+    assert [f.data["value"] for f in findings] == ["ALLOWALL", "NONSENSE"]
+
+
+def test_a_repeated_header_still_names_an_identical_defect_once():
+    codes = [f.code for f in headers.analyze_all({"x-frame-options": ["ALLOWALL", "ALLOWALL"]})]
     assert codes.count("xfo-invalid") == 1
 
 

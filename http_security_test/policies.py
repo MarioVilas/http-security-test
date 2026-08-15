@@ -63,43 +63,17 @@ def _analyze_pp(value):
         # Permissions-Policy headers, where it parses as nothing at all.
         if ";" in stripped or "'" in stripped:
             return [
-                Finding(
-                    "Permissions-Policy",
-                    "pp-legacy-syntax",
-                    "present but written in the older Feature-Policy syntax (%s), "
-                    "which browsers cannot parse, so the whole header is ignored"
-                    % stripped,
-                )
+                Finding("Permissions-Policy", "pp-legacy-syntax", {"value": stripped})
             ]
-        return [
-            Finding(
-                "Permissions-Policy",
-                "pp-invalid",
-                "present but %s is not a feature=allowlist pair, so browsers "
-                "ignore the whole header" % malformed[0],
-            )
-        ]
+        return [Finding("Permissions-Policy", "pp-invalid", {"item": malformed[0]})]
 
     policy = parse_permissions_policy(stripped)
     if not policy:
-        return [
-            Finding(
-                "Permissions-Policy",
-                "pp-empty",
-                "present but sets no feature, so it restricts nothing",
-            )
-        ]
+        return [Finding("Permissions-Policy", "pp-empty")]
 
     wildcarded = sorted(name for name, allowlist in policy.items() if "*" in allowlist)
     if wildcarded:
-        return [
-            Finding(
-                "Permissions-Policy",
-                "pp-wildcard",
-                "present but allows %s in every origin (*), including third party "
-                "frames the page embeds" % ", ".join(wildcarded),
-            )
-        ]
+        return [Finding("Permissions-Policy", "pp-wildcard", {"features": wildcarded})]
 
     return []
 
@@ -136,35 +110,17 @@ def _analyze_fp(value):
     # page sending only this one is protected there and nowhere else. The
     # syntaxes differ, which is why pp-legacy-syntax exists for the reverse
     # mistake of writing this spelling under the new name.
-    findings = [
-        Finding(
-            "Feature-Policy",
-            "fp-deprecated",
-            "present but superseded by Permissions-Policy, which uses a "
-            "different syntax; only Chromium still honours this header",
-        )
-    ]
+    findings = [Finding("Feature-Policy", "fp-deprecated")]
 
     policy = parse_feature_policy(value)
     if not policy:
-        findings.append(
-            Finding(
-                "Feature-Policy",
-                "fp-empty",
-                "present but sets no feature, so it restricts nothing",
-            )
-        )
+        findings.append(Finding("Feature-Policy", "fp-empty"))
         return findings
 
     wildcarded = sorted(name for name, allow in policy.items() if "*" in allow)
     if wildcarded:
         findings.append(
-            Finding(
-                "Feature-Policy",
-                "fp-wildcard",
-                "present but allows %s in every origin (*), including third "
-                "party frames the page embeds" % ", ".join(wildcarded),
-            )
+            Finding("Feature-Policy", "fp-wildcard", {"features": wildcarded})
         )
 
     return findings
@@ -190,12 +146,4 @@ def _analyze_policy_overlap(present):
     )
     if not disagree:
         return []
-    return [
-        Finding(
-            "Feature-Policy",
-            "fp-conflicts",
-            "present alongside Permissions-Policy, and the two disagree about "
-            "%s; which one applies is an implementation detail, so the policy "
-            "should be stated once" % ", ".join(disagree),
-        )
-    ]
+    return [Finding("Feature-Policy", "fp-conflicts", {"features": disagree})]

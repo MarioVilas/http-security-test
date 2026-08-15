@@ -62,12 +62,7 @@ def _analyze_hsts(value):
 
     if directives.get("max-age") is None:
         return [
-            Finding(
-                "Strict-Transport-Security",
-                "hsts-malformed",
-                "present but specifies no max-age, so browsers ignore the policy "
-                "entirely",
-            )
+            Finding("Strict-Transport-Security", "hsts-malformed", {"max_age": None})
         ]
     try:
         max_age = int(directives["max-age"])
@@ -76,39 +71,25 @@ def _analyze_hsts(value):
             Finding(
                 "Strict-Transport-Security",
                 "hsts-malformed",
-                "present but its max-age is not a number (%s), so browsers ignore "
-                "the policy entirely" % directives["max-age"],
+                {"max_age": directives["max-age"]},
             )
         ]
 
     findings = []
     if max_age == 0:
-        findings.append(
-            Finding(
-                "Strict-Transport-Security",
-                "hsts-max-age-zero",
-                "present but set to max-age=0, which tells browsers to forget the "
-                "policy and permits plaintext connections again",
-            )
-        )
+        findings.append(Finding("Strict-Transport-Security", "hsts-max-age-zero"))
     elif max_age < HSTS_MIN_MAX_AGE:
         findings.append(
             Finding(
                 "Strict-Transport-Security",
                 "hsts-max-age-short",
-                "present but its max-age is only %d seconds, below the "
-                "recommended minimum of %d (six months)" % (max_age, HSTS_MIN_MAX_AGE),
+                {"max_age": max_age, "minimum": HSTS_MIN_MAX_AGE},
             )
         )
 
     if "includesubdomains" not in directives:
         findings.append(
-            Finding(
-                "Strict-Transport-Security",
-                "hsts-no-include-subdomains",
-                "present but does not set includeSubDomains, leaving subdomains "
-                "reachable over plaintext HTTP",
-            )
+            Finding("Strict-Transport-Security", "hsts-no-include-subdomains")
         )
 
     # The preload directive is a submission to a list browsers ship, and the
@@ -117,19 +98,19 @@ def _analyze_hsts(value):
     if "preload" in directives:
         unmet = []
         if "includesubdomains" not in directives:
-            unmet.append("includeSubDomains")
+            unmet.append("include-subdomains")
         if max_age < HSTS_PRELOAD_MIN_MAX_AGE:
-            unmet.append(
-                "a max-age of at least %d (one year) rather than %d"
-                % (HSTS_PRELOAD_MIN_MAX_AGE, max_age)
-            )
+            unmet.append("max-age")
         if unmet:
             findings.append(
                 Finding(
                     "Strict-Transport-Security",
                     "hsts-preload-ineffective",
-                    "present with preload, but the preload list requires %s, so "
-                    "the domain would not be accepted" % " and ".join(unmet),
+                    {
+                        "unmet": unmet,
+                        "minimum": HSTS_PRELOAD_MIN_MAX_AGE,
+                        "max_age": max_age,
+                    },
                 )
             )
 
@@ -150,11 +131,4 @@ def _analyze_preload(present, host):
         return []
     if hstspreload.in_hsts_preload(host):
         return []
-    return [
-        Finding(
-            "Strict-Transport-Security",
-            "hsts-not-preloaded",
-            "present with preload, but %s is not on the list browsers ship, so "
-            "the very first visit is still unprotected" % host,
-        )
-    ]
+    return [Finding("Strict-Transport-Security", "hsts-not-preloaded", {"host": host})]

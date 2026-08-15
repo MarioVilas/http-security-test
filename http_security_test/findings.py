@@ -25,8 +25,29 @@ to a particular site is not something this package can know.
 """
 
 import collections
+import json
 
-Finding = collections.namedtuple("Finding", "header code message")
+# A finding is a header, a stable code, and the values that made it true. It
+# carries no prose: the sentence lives in catalog.py, keyed by the code, and is
+# rendered from `data` on demand. `data` defaults to None for the many findings
+# that have nothing to add beyond the code.
+Finding = collections.namedtuple("Finding", "header code data", defaults=(None,))
+
+
+def identity(finding):
+    """What makes two findings the same finding.
+
+    The header and the code are not enough once a code can fire more than once
+    against one header -- two cookies each missing Secure are two defects, not
+    one -- so the data is part of it. Serialised rather than hashed because the
+    values are lists and dicts, and sorted so that key order cannot make one
+    finding look like two.
+    """
+    return (
+        finding.header,
+        finding.code,
+        json.dumps(finding.data, sort_keys=True, default=str),
+    )
 
 
 # How bad each finding is. A consumer is free to ignore these and apply its own

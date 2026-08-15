@@ -27,7 +27,7 @@ moot. The headers that belong to no family are judged here too.
 import re
 
 from .csp import _analyze_csp, _analyze_csp_all, parse_csp
-from .findings import Finding
+from .findings import Finding, identity
 from .hsts import _analyze_hsts, _analyze_preload
 from .isolation import (
     _analyze_acao,
@@ -344,35 +344,16 @@ CACHE_HEADERS = (
 def _analyze_xfo(value):
     normalized = value.strip().upper()
     if normalized.startswith("ALLOW-FROM"):
-        return [
-            Finding(
-                "X-Frame-Options",
-                "xfo-deprecated",
-                "present but uses ALLOW-FROM, which no current browser supports; "
-                "a CSP frame-ancestors directive is the replacement",
-            )
-        ]
+        return [Finding("X-Frame-Options", "xfo-deprecated")]
     if normalized not in ("DENY", "SAMEORIGIN"):
-        return [
-            Finding(
-                "X-Frame-Options",
-                "xfo-invalid",
-                "present but has an unrecognised value (%s), so browsers ignore it "
-                "and the page stays framable" % value.strip(),
-            )
-        ]
+        return [Finding("X-Frame-Options", "xfo-invalid", {"value": value.strip()})]
     return []
 
 
 def _analyze_xcto(value):
     if value.strip().lower() != "nosniff":
         return [
-            Finding(
-                "X-Content-Type-Options",
-                "xcto-invalid",
-                "present but set to %s rather than nosniff, so MIME type sniffing "
-                "stays enabled" % value.strip(),
-            )
+            Finding("X-Content-Type-Options", "xcto-invalid", {"value": value.strip()})
         ]
     return []
 
@@ -389,23 +370,9 @@ def _analyze_rp(value):
             effective = token
 
     if effective is None:
-        return [
-            Finding(
-                "Referrer-Policy",
-                "rp-invalid",
-                "present but carries no recognised policy token (%s), so the "
-                "browser default applies instead" % value.strip(),
-            )
-        ]
+        return [Finding("Referrer-Policy", "rp-invalid", {"value": value.strip()})]
     if effective == "unsafe-url":
-        return [
-            Finding(
-                "Referrer-Policy",
-                "rp-unsafe-url",
-                "present but set to unsafe-url, which leaks the full URL, query "
-                "string included, to third-party origins",
-            )
-        ]
+        return [Finding("Referrer-Policy", "rp-unsafe-url")]
     return []
 
 
@@ -420,13 +387,7 @@ def _analyze_csd(value):
     """
     members = [member.strip() for member in value.split(",") if member.strip()]
     if not members:
-        return [
-            Finding(
-                "Clear-Site-Data",
-                "csd-empty",
-                "present but names no data type, so nothing is cleared",
-            )
-        ]
+        return [Finding("Clear-Site-Data", "csd-empty")]
 
     unquoted = []
     unknown = []
@@ -441,23 +402,11 @@ def _analyze_csd(value):
     findings = []
     if unquoted:
         findings.append(
-            Finding(
-                "Clear-Site-Data",
-                "csd-unquoted",
-                "present but %s is not quoted, and the quotes are part of the "
-                "value; browsers match the type with them, so this member is "
-                "skipped and whatever it names is not cleared" % ", ".join(unquoted),
-            )
+            Finding("Clear-Site-Data", "csd-unquoted", {"members": unquoted})
         )
     if unknown:
         findings.append(
-            Finding(
-                "Clear-Site-Data",
-                "csd-unknown-type",
-                "present but %s is not a data type browsers know, and the "
-                "comparison is byte-for-byte, so the member is ignored"
-                % ", ".join('"%s"' % name for name in unknown),
-            )
+            Finding("Clear-Site-Data", "csd-unknown-type", {"types": unknown})
         )
     return findings
 
@@ -472,32 +421,16 @@ def _analyze_ip(value):
     """
     policy = parse_integrity_policy(value)
     if policy is None:
-        return [
-            Finding(
-                "Integrity-Policy",
-                "ip-invalid",
-                "present but is not a dictionary of inner lists (%s); browsers "
-                "parse the header whole or not at all, so nothing is enforced. "
-                "The items of a list are separated by spaces, not commas, and "
-                "are bare tokens rather than quoted strings" % value.strip(),
-            )
-        ]
+        return [Finding("Integrity-Policy", "ip-invalid", {"value": value.strip()})]
 
     destinations = policy.get("blocked-destinations", [])
     blocking = [name for name in destinations if name in IP_BLOCKING_DESTINATIONS]
     if not blocking:
-        if not destinations:
-            detail = "names no destination to block"
-        else:
-            detail = "names only %s, which no engine blocks on" % ", ".join(
-                destinations
-            )
         return [
             Finding(
                 "Integrity-Policy",
                 "ip-no-blocked-destinations",
-                "present but %s, so every script and stylesheet still loads "
-                "without integrity metadata" % detail,
+                {"destinations": destinations},
             )
         ]
 
@@ -507,12 +440,7 @@ def _analyze_ip(value):
     if sources is not None and IP_SOURCE_INLINE not in sources:
         return [
             Finding(
-                "Integrity-Policy",
-                "ip-sources-without-inline",
-                "present but sources is set to (%s) and does not include "
-                "inline, and the browser supplies that default only when the "
-                "directive is absent, so the policy enforces nothing despite "
-                "naming a destination" % " ".join(sources),
+                "Integrity-Policy", "ip-sources-without-inline", {"sources": sources}
             )
         ]
 
@@ -521,23 +449,11 @@ def _analyze_ip(value):
     if unknown:
         findings.append(
             Finding(
-                "Integrity-Policy",
-                "ip-unknown-destination",
-                "present but blocked-destinations names %s, which is not a "
-                "request destination the policy defines, so that entry is "
-                "ignored" % ", ".join(unknown),
+                "Integrity-Policy", "ip-unknown-destination", {"destinations": unknown}
             )
         )
     if "style" in destinations:
-        findings.append(
-            Finding(
-                "Integrity-Policy",
-                "ip-style-unsupported",
-                "present and asks for style, which no engine implements yet -- "
-                "Firefox only behind a preference; the script destination "
-                "beside it is unaffected",
-            )
-        )
+        findings.append(Finding("Integrity-Policy", "ip-style-unsupported"))
     return findings
 
 
@@ -599,7 +515,7 @@ def _report_missing(present, secure=True):
             continue
         if not secure and name == "Strict-Transport-Security":
             continue
-        findings.append(Finding(name, _missing_tag(name), "missing"))
+        findings.append(Finding(name, _missing_tag(name)))
     return findings
 
 
@@ -645,15 +561,7 @@ def _analyze_duplicates(present):
     itself: a backend assembling responses inconsistently, a proxy bolting one
     on, or a response-splitting attempt.
     """
-    return [
-        Finding(
-            name,
-            "duplicate-headers",
-            "sent more than once, which no specification defines: clients differ "
-            "on which value wins, so the response does not mean one thing",
-        )
-        for name in _duplicated(present)
-    ]
+    return [Finding(name, "duplicate-headers") for name in _duplicated(present)]
 
 
 def _analyze_report_only(present):
@@ -668,14 +576,7 @@ def _analyze_report_only(present):
             continue
         if _lookup(present, enforcing) is not None:
             continue
-        findings.append(
-            Finding(
-                name,
-                code,
-                "present but %s is not, so the policy is measured and never "
-                "applied; nothing here blocks anything" % enforcing,
-            )
-        )
+        findings.append(Finding(name, code, {"enforcing": enforcing}))
     return findings
 
 
@@ -716,13 +617,7 @@ def _analyze_ip_reporting(present):
     if not undefined:
         return []
     return [
-        Finding(
-            "Integrity-Policy",
-            "ip-endpoints-undefined",
-            "present and reports to %s, which no Reporting-Endpoints header "
-            "defines, so violations are caught and never delivered"
-            % ", ".join(undefined),
-        )
+        Finding("Integrity-Policy", "ip-endpoints-undefined", {"endpoints": undefined})
     ]
 
 
@@ -793,31 +688,29 @@ def analyze_all(present, secure=True, host=None):
     # of a header and what is wrong with it: the second occurrence adds nothing.
     # Two *different* headers sharing a code stay, because they are two findings.
     seen = set()
-    unique = [
-        f
-        for f in findings
-        if not ((f.header, f.code) in seen or seen.add((f.header, f.code)))
-    ]
+    unique = [f for f in findings if not (identity(f) in seen or seen.add(identity(f)))]
     return _suppress_redundant(unique, present)
 
 
-def find_cache_headers(present):
-    """Return only the headers that implement cache related features.
+def inventory(present):
+    """What the response carries, before anything is judged about it.
 
-    Note that the values of these headers are NOT analyzed."""
-    return _filter_headers(present, CACHE_HEADERS)
+    Four tables, and the split between them is the point: `security` and
+    `missing` are two halves of one question, `deprecated` names headers whose
+    values are analysed elsewhere, and `information` and `caching` name headers
+    whose values are never analysed at all -- only a human can say whether a
+    particular `Server` banner is a leak.
 
-
-def find_information_headers(present):
-    """Return only the headers that are commonly associated with information leaks.
-
-    Note that the values of these headers are NOT analyzed."""
-    return _filter_headers(present, INFORMATION_HEADERS)
-
-
-def find_deprecated_headers(present):
-    """Return only the obsolete security headers the response carries.
-
-    Unlike the other two, the values of these headers ARE analyzed: see
-    analyze()."""
-    return _filter_headers(present, DEPRECATED_HEADERS)
+    Nothing here is withheld because of what it contains, which is why there is
+    no `secure` argument. A plaintext response is still missing HSTS and this
+    says so; whether that absence is a *finding* is a judgment, and judgments
+    are analyze_all's business.
+    """
+    present = _normalize(present)
+    return {
+        "security": _filter_headers(present, SECURITY_HEADERS),
+        "missing": [name for name in SECURITY_HEADERS if name.lower() not in present],
+        "deprecated": _filter_headers(present, DEPRECATED_HEADERS),
+        "information": _filter_headers(present, INFORMATION_HEADERS),
+        "caching": _filter_headers(present, CACHE_HEADERS),
+    }

@@ -9,24 +9,40 @@ GPL-3.0-or-later. Every source file carries the notice.
 ## Layout
 
 ```
-findings.py    Finding, FINDING_SEVERITY, SEVERITIES, severity(), order_findings()
+findings.py    Finding, identity(), FINDING_SEVERITY, SEVERITIES, severity(), order_findings()
+catalog.py     MESSAGES + describe(): every sentence the package can produce
 message.py     the header mapping model: parse_headers, parse_raw_headers, lookups
 csp.py         Content-Security-Policy                      (largest module)
 hsts.py        Strict-Transport-Security + the ONLY third-party dependency
 isolation.py   COOP / COEP / CORP / CORS
 policies.py    Permissions-Policy + Feature-Policy
 legacy.py      the obsolete headers
-response.py    tables, registry, cross-header rules, analyze_all, orphan headers
+response.py    tables, registry, cross-header rules, analyze_all, inventory, orphans
+reporting.py   report(): findings + inventories as plain data, ready for JSON
 __init__.py    public API
 ```
 
 Dependencies run one way and there are no cycles:
 
 ```
-findings, message  ->  (nothing)
+findings, message, catalog  ->  (nothing)
 csp, hsts, isolation, legacy, policies  ->  findings [, message]
-response  ->  all of the above
+response   ->  all of the above except catalog
+reporting  ->  response, findings, catalog
 ```
+
+`catalog.py` is a leaf on purpose and **no analyser may import it**. The
+analysers emit `(header, code, data)` and hold no prose; only `reporting.py` and
+a consumer calling `describe()` turn that into a sentence. A test reads the
+syntax of every `Finding()` call to keep it that way -- prose in a comment or a
+docstring is ordinary English and fine, a sentence passed as `data` is not.
+
+Two naming rules, both learned the hard way in one session: a module and an
+exported callable must not share a name (`from .message import ...` sets
+`http_security_test.message` to the submodule and silently clobbers a function
+of that name -- which is why the renderer is `describe()` and not `message()`),
+and `catalog.py` is not called `messages.py` because one character from
+`message.py` is not a distinction.
 
 **The boundary that matters:** a family module answers *"what is wrong with this
 header"* — a value in, findings out, no knowledge of siblings. `response.py`
@@ -47,8 +63,11 @@ be overkill.
 These were expensive to arrive at. Do not quietly reverse them.
 
 1. **Findings are facts; ratings are policy — but published.** A finding is
-   `(header, code, message)`. The ratings are SARIF levels (`error` / `warning` /
-   `note`) so a consumer can adopt, remap, or ignore them.
+   `(header, code, data)`. The ratings are SARIF levels (`error` / `warning` /
+   `note`) so a consumer can adopt, remap, or ignore them, and the wording is
+   split off the same way: a template belongs to the rule and the values belong
+   to the result, which is SARIF's `messageStrings` + `arguments` in all but
+   name. `data` is the contract; the sentence is a convenience.
 2. **Inventories are facts, findings are judgments.** Nothing is withheld from an
    inventory because of what it contains. HSTS appears in a `missing` inventory on
    a plaintext target; the *finding* is what `secure=False` suppresses.
@@ -85,7 +104,17 @@ mutation-verified.
   or the completeness tests pass vacuously.
 - A code belongs to exactly one header. **Exception:** `duplicate-headers`, which
   is about the response; it is explicitly exempted in that test.
-- Findings are deduped by `(header, code)`, never by `code` alone.
+- Findings are deduped by `identity()` — `(header, code, data)` — never by
+  `code` alone and no longer by `(header, code)` either. The pair was right only
+  while a finding carried prose: two `X-Frame-Options` values that are both
+  invalid are two facts, and two cookies each missing `Secure` will be two more.
+  A repeated header with *identical* values still reports once, because the data
+  is identical too.
+- Every emittable code has a message template **and** every template's code is
+  emittable — the same bijection the severities have, checked the same way.
+  Separately, every finding the corpus can produce is rendered, because a
+  template naming `{sources}` beside data carrying `directives` is invisible
+  until someone asks for the sentence.
 - Output order is deterministic: the tables are tuples, not sets. A set literal
   here reorders output per process.
 
@@ -112,6 +141,86 @@ that split is `CSP_SYNTAX_CODES`. Getting this wrong inverts the verdict.
 anything else repeated raises `duplicate-headers`. `_sole_value()` returns `None`
 for a header repeated with values that disagree — no specification says which
 wins, so no suppression can be earned from it.
+
+## The output schema
+
+`report(present, secure=True, host=None, message=True, raw=None,
+request_raw=None)` is the whole analysis of one exchange as plain data —
+strings, numbers, lists, dicts, no encoder needed:
+
+```json
+{
+  "response": {
+    "findings": [
+      {"header": "Clear-Site-Data", "code": "csd-unquoted", "level": "error",
+       "data": {"members": ["cookies"]}, "message": "present but cookies is not…"}
+    ],
+    "inventory": {
+      "security": {}, "missing": [], "deprecated": {}, "information": {},
+      "caching": {}
+    },
+    "raw": "<base64>"
+  },
+  "request": {"raw": "<base64>"}
+}
+```
+
+Decisions inside that shape, each of which had an alternative:
+
+- **A list of findings, not `{severity: [code]}`.** The old tool's schema grouped
+  codes under a severity, which is lossless only while a code identifies one
+  header and cannot repeat. Neither holds: `duplicate-headers` names several
+  headers today, and per-cookie findings will repeat within one header.
+- **Nested by message, not flat.** Not only for the parked `request.py`:
+  `Cache-Control` is *both* a request and a response header, so a bare `header`
+  field could not say which one a finding meant once requests are analysed.
+  `request` grows `findings` and `inventory` when that lands and nothing else
+  moves. **A finding about the exchange goes under `response`** — origin
+  reflection is a defect in what the response did, with the forged `Origin` in
+  `data`. Do not add a top-level `findings` for those; it would be empty in
+  every ordinary report and force consumers to merge two lists forever.
+- **No URL key.** A response does not know where it came from. A tool that
+  fetched several wraps as many of these as it fetched — that is a fact about
+  the run, not about any response.
+- **`level` is denormalised.** It is derivable from `code`, and written out
+  anyway, because the common reader wants to sort by severity without also
+  carrying `FINDING_SEVERITY`.
+- **`data` is always present, `{}` included**, so a consumer never tests for the
+  key. `message` can be dropped entirely with `message=False`.
+- **`inventory()` takes no `secure`.** Principle 2: nothing is withheld from an
+  inventory. HSTS is missing on a plaintext response and the inventory says so.
+- **Absent beats empty for passthrough.** No blob, no `raw` key; nothing known
+  about the request, no `request` key. The rule that reconciles this with `data`
+  always being `{}`: content this package *derived* is always present, content
+  it was merely *given* is present only if it was given.
+
+The `raw` blobs are optional and this package never fetches anything, so they
+are whatever the caller hands over. Two things decided about them:
+
+- **The library does the base64**, from bytes or text, text encoded latin-1 to
+  match what `parse_raw_headers()` decodes with. One encoding decision in one
+  place — the alternative was accepting a ready-encoded string, which leaves
+  nothing enforcing whether it is base64 of UTF-8 or of latin-1, and that bug
+  stays invisible until a non-ASCII `Server` banner turns up. Base64 at all
+  because header values are latin-1: `Server: café-server` is not valid UTF-8
+  and a JSON string cannot carry it losslessly.
+- **A blob makes a report reproducible.** `raw` is exactly what
+  `parse_raw_headers()` accepts, so an archived report can be re-analysed by a
+  later version and the findings diffed. That is the real argument for carrying
+  it, more than provenance.
+- **They carry credentials.** A raw response head normally includes `Set-Cookie`
+  with a live session token; a raw request includes `Cookie` and
+  `Authorization`. Nothing here can police it, and reports get pasted into
+  tickets and dashboards. Passing only the header block, redacting, or passing
+  nothing is the caller's call — the docstring makes sure it is a call and not
+  an accident.
+
+The three `find_*` functions are gone; `inventory()` replaces them and adds the
+`missing` list, which every consumer previously rebuilt by hand. Deriving those
+inventories from findings does **not** work and the temptation is real: the 91
+information headers and the 5 caching headers emit no findings at all by design,
+and `missing` deliberately differs from the `-missing` findings wherever a
+suppression applies.
 
 ## Working practices that paid off
 
@@ -176,9 +285,10 @@ wins, so no suppression can be earned from it.
 ## Parked, with intent to do
 
 - **`Set-Cookie` analysis** — `Secure`, `HttpOnly`, `SameSite=None` without
-  `Secure`, and the `__Host-` / `__Secure-` prefix rules. The mapping already
-  supports repeated headers, so the blocker is gone; findings will need to
-  identify *which* cookie.
+  `Secure`, and the `__Host-` / `__Secure-` prefix rules. Both blockers are now
+  gone: the mapping supports repeated headers, and `identity()` means a code can
+  fire more than once against one header without the second being deduped away.
+  Put the cookie's name in `data` so two cookies are two findings.
 - **The cache/cookie cross-header quirk — land it *with* the cookie parser, not
   before.** RFC 9111 §7.3: "the Set-Cookie response header field does not inhibit
   caching; a cacheable response with a Set-Cookie header field can be (and often
@@ -229,6 +339,6 @@ Read for ideas and reference, never copy.
 
 ## Status
 
-85 codes (34 error / 27 warning / 24 note). 235 tests, 87 test functions, all
-passing; `ruff check` clean. `pyproject.toml` is a placeholder — hatchling, no
+85 codes (34 error / 27 warning / 24 note), each with a rating and a message
+template. 255 tests, 107 test functions, all passing; `ruff check` clean. `pyproject.toml` is a placeholder — hatchling, no
 README yet, `hstspreload` declared as the optional `[preload]` extra.

@@ -59,9 +59,7 @@ DEPRECATED_HEADERS = (
 
 def _analyze_ect(value):
     # No need to parse the actual policy since no browser uses it anyway.
-    return [
-        Finding("Expect-CT", "ect-deprecated", "present but deprecated since June 2021")
-    ]
+    return [Finding("Expect-CT", "ect-deprecated")]
 
 
 def _analyze_p3p(value):
@@ -69,25 +67,11 @@ def _analyze_p3p(value):
     # party cookies, and the W3C abandoned the spec. Its compact policy is not
     # worth parsing: a large share of deployments were deliberate nonsense sent
     # to make IE relent, and nothing has consumed either kind since IE retired.
-    return [
-        Finding(
-            "P3P",
-            "p3p-deprecated",
-            "present but P3P was only ever read by Internet Explorer, which is "
-            "retired, and the specification was abandoned",
-        )
-    ]
+    return [Finding("P3P", "p3p-deprecated")]
 
 
 def _analyze_xdo(value):
-    return [
-        Finding(
-            "X-Download-Options",
-            "xdo-deprecated",
-            "present but only Internet Explorer read it, to stop a download "
-            "being opened in the site's own origin; no current browser does",
-        )
-    ]
+    return [Finding("X-Download-Options", "xdo-deprecated")]
 
 
 def _analyze_xdpc(value):
@@ -101,61 +85,23 @@ def _analyze_xdpc(value):
     # anyway, and `off` is a real measure in the one engine that honours it, so
     # neither is a defect and neither is a policy. OWASP recommends sending it;
     # that recommendation is not contradicted here, only qualified.
-    return [
-        Finding(
-            "X-DNS-Prefetch-Control",
-            "xdpc-nonstandard",
-            "present but no specification defines it: browser testing finds DNS "
-            "prefetching is a Chromium behaviour and that only Chrome acts on "
-            "the header, so this is a Chrome-only measure rather than a policy "
-            "other engines can be expected to honour",
-        )
-    ]
+    return [Finding("X-DNS-Prefetch-Control", "xdpc-nonstandard")]
 
 
 def _analyze_hpkp(value):
-    return [
-        Finding(
-            "Public-Key-Pins",
-            "hpkp-deprecated",
-            "present but every browser has removed key pinning, so the pins "
-            "bind nothing; it was withdrawn because a mistake could lock users "
-            "out of a site for the lifetime of the policy",
-        )
-    ]
+    return [Finding("Public-Key-Pins", "hpkp-deprecated")]
 
 
 def _analyze_hpkp_report_only(value):
-    return [
-        Finding(
-            "Public-Key-Pins-Report-Only",
-            "hpkp-ro-deprecated",
-            "present but every browser has removed key pinning, so nothing is "
-            "measured and nothing is reported",
-        )
-    ]
+    return [Finding("Public-Key-Pins-Report-Only", "hpkp-ro-deprecated")]
 
 
 def _analyze_xcsp(value):
-    return [
-        Finding(
-            "X-Content-Security-Policy",
-            "xcsp-deprecated",
-            "present but no browser has read this header since Firefox 23; if "
-            "it is the only policy sent, the page has none",
-        )
-    ]
+    return [Finding("X-Content-Security-Policy", "xcsp-deprecated")]
 
 
 def _analyze_xwkcsp(value):
-    return [
-        Finding(
-            "X-WebKit-CSP",
-            "xwkcsp-deprecated",
-            "present but no browser has read this header since Chrome 25; if "
-            "it is the only policy sent, the page has none",
-        )
-    ]
+    return [Finding("X-WebKit-CSP", "xwkcsp-deprecated")]
 
 
 def _analyze_xpcdp(value):
@@ -164,24 +110,10 @@ def _analyze_xpcdp(value):
     # none-this-response withholds the policy file from this one response, which
     # is the same answer as none for the response being analyzed.
     if normalized in ("none", "none-this-response"):
-        return [
-            Finding(
-                "X-Permitted-Cross-Domain-Policies",
-                "xpcdp-deprecated",
-                "present but permits no cross-domain policy file, which is the "
-                "restrictive setting; only Flash and Acrobat clients ever read it",
-            )
-        ]
+        return [Finding("X-Permitted-Cross-Domain-Policies", "xpcdp-deprecated")]
 
     if normalized == "all":
-        return [
-            Finding(
-                "X-Permitted-Cross-Domain-Policies",
-                "xpcdp-all",
-                "present but set to all, so any file on the server can serve as a "
-                "cross-domain policy, including whatever a user can upload",
-            )
-        ]
+        return [Finding("X-Permitted-Cross-Domain-Policies", "xpcdp-all")]
 
     # The remaining values narrow which files count as a policy without saying
     # what those files permit, so the answer is in crossdomain.xml, not here.
@@ -190,8 +122,7 @@ def _analyze_xpcdp(value):
             Finding(
                 "X-Permitted-Cross-Domain-Policies",
                 "xpcdp-policy-file",
-                "present and set to %s, which leaves cross-domain access to the "
-                "policy file; check crossdomain.xml" % normalized,
+                {"value": normalized},
             )
         ]
 
@@ -199,8 +130,7 @@ def _analyze_xpcdp(value):
         Finding(
             "X-Permitted-Cross-Domain-Policies",
             "xpcdp-invalid",
-            "present but has an unrecognised value (%s), so clients fall back to "
-            "their default policy" % value.strip(),
+            {"value": value.strip()},
         )
     ]
 
@@ -208,28 +138,9 @@ def _analyze_xpcdp(value):
 def _analyze_xxp(value):
     normalized = value.strip().lower().replace(" ", "")
     if normalized == "0":
-        return [Finding("X-XSS-Protection", "xxp-deprecated", "present but disabled")]
+        return [Finding("X-XSS-Protection", "xxp-deprecated")]
     elif normalized == "1":
-        return [
-            Finding(
-                "X-XSS-Protection",
-                "xxp-enabled",
-                "present and enabled, which in some cases can create XSS vulnerabilities in otherwise safe websites",
-            )
-        ]
+        return [Finding("X-XSS-Protection", "xxp-enabled")]
     elif normalized == "1;mode=block":
-        return [
-            Finding(
-                "X-XSS-Protection",
-                "xxp-blocked",
-                "present and enabled in blocked mode, which may lead to side channel attacks on iframe embeddable websites",
-            )
-        ]
-    return [
-        Finding(
-            "X-XSS-Protection",
-            "xxp-invalid",
-            "present but has an unrecognised value (%s), expected '0', '1' or '1; mode=block'"
-            % value.strip(),
-        )
-    ]
+        return [Finding("X-XSS-Protection", "xxp-blocked")]
+    return [Finding("X-XSS-Protection", "xxp-invalid", {"value": value.strip()})]

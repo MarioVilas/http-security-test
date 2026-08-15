@@ -23,23 +23,36 @@ knowledge. What a badly configured header is worth to a particular site is not,
 so a consumer is free to remap the ratings or ignore them entirely.
 
 Build the mapping with parse_headers() or parse_raw_headers() and hand it to
-analyze_all(). analyze() is public for judging one header on its own.
+report(), which returns the findings and the inventories as plain data ready to
+serialise. analyze_all() is the same analysis as Finding objects, and analyze()
+judges one header on its own.
+
+A finding carries no prose: it is `(header, code, data)`, and describe() turns
+one into a sentence from the catalog. A consumer that would rather write its own
+wording, or none, can read `data` and ignore the catalog entirely.
 """
 
+from .catalog import MESSAGES, describe
 from .csp import parse_csp
-from .findings import FINDING_SEVERITY, SEVERITIES, Finding, order_findings, severity
+from .findings import (
+    FINDING_SEVERITY,
+    SEVERITIES,
+    Finding,
+    identity,
+    order_findings,
+    severity,
+)
 from .legacy import DEPRECATED_HEADERS
 from .message import parse_headers, parse_raw_headers
 from .policies import parse_feature_policy, parse_permissions_policy
+from .reporting import finding_as_dict, report
 from .response import (
     CACHE_HEADERS,
     INFORMATION_HEADERS,
     SECURITY_HEADERS,
     analyze,
     analyze_all,
-    find_cache_headers,
-    find_deprecated_headers,
-    find_information_headers,
+    inventory,
 )
 
 __all__ = [
@@ -47,19 +60,22 @@ __all__ = [
     "DEPRECATED_HEADERS",
     "FINDING_SEVERITY",
     "INFORMATION_HEADERS",
+    "MESSAGES",
     "SECURITY_HEADERS",
     "SEVERITIES",
     "Finding",
     "analyze",
     "analyze_all",
-    "find_cache_headers",
-    "find_deprecated_headers",
-    "find_information_headers",
+    "describe",
+    "finding_as_dict",
+    "identity",
+    "inventory",
     "order_findings",
     "parse_csp",
     "parse_feature_policy",
     "parse_headers",
     "parse_permissions_policy",
     "parse_raw_headers",
+    "report",
     "severity",
 ]

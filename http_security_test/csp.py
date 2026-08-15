@@ -278,8 +278,7 @@ def _analyze_syntax(directives):
             Finding(
                 "Content-Security-Policy",
                 "csp-missing-semicolon",
-                "present but lists %s as a source value, so a semicolon is "
-                "missing and that directive is not in force at all" % ", ".join(stray),
+                {"directives": stray},
             )
         )
 
@@ -289,8 +288,7 @@ def _analyze_syntax(directives):
             Finding(
                 "Content-Security-Policy",
                 "csp-unknown-directive",
-                "present but sets %s, which no browser recognises, so that part "
-                "of the policy does nothing" % ", ".join(unknown),
+                {"directives": unknown},
             )
         )
 
@@ -300,8 +298,7 @@ def _analyze_syntax(directives):
             Finding(
                 "Content-Security-Policy",
                 "csp-deprecated-directive",
-                "present but sets %s, which was dropped from the standard and is "
-                "parsed and ignored" % ", ".join(obsolete),
+                {"directives": obsolete},
             )
         )
 
@@ -320,10 +317,7 @@ def _analyze_syntax(directives):
     if invalid:
         findings.append(
             Finding(
-                "Content-Security-Policy",
-                "csp-invalid-keyword",
-                "present but lists %s, which is read as a hostname rather than "
-                "the keyword it resembles" % ", ".join(invalid),
+                "Content-Security-Policy", "csp-invalid-keyword", {"sources": invalid}
             )
         )
 
@@ -340,9 +334,7 @@ def _analyze_syntax(directives):
             Finding(
                 "Content-Security-Policy",
                 "csp-nonce-weak",
-                "present but its nonce %s is guessable: nonces need at least %d "
-                "base64 characters and a fresh value per response"
-                % (", ".join(weak), CSP_MIN_NONCE_LENGTH),
+                {"nonces": weak, "minimum": CSP_MIN_NONCE_LENGTH},
             )
         )
 
@@ -401,9 +393,7 @@ def _analyze_csp(value):
             Finding(
                 "Content-Security-Policy",
                 "csp-unsafe-inline",
-                "present but allows unsafe-inline in %s, defeating most of the "
-                "cross-site scripting protection a policy provides"
-                % ", ".join(inline_script),
+                {"directives": inline_script},
             )
         )
 
@@ -413,32 +403,15 @@ def _analyze_csp(value):
             Finding(
                 "Content-Security-Policy",
                 "csp-unsafe-inline-style",
-                "present but allows unsafe-inline in %s, so injected CSS can "
-                "redress the interface and, where the policy allows an outbound "
-                "source, read page data through selector-driven requests; it "
-                "cannot run script" % ", ".join(inline_style),
+                {"directives": inline_style},
             )
         )
 
     if _has_keyword(_sources(directives, "script-src"), "'unsafe-eval'"):
-        findings.append(
-            Finding(
-                "Content-Security-Policy",
-                "csp-unsafe-eval",
-                "present but allows unsafe-eval in script-src, permitting "
-                "strings to be executed as code",
-            )
-        )
+        findings.append(Finding("Content-Security-Policy", "csp-unsafe-eval"))
 
     if "default-src" not in directives and "script-src" not in directives:
-        findings.append(
-            Finding(
-                "Content-Security-Policy",
-                "csp-no-default-src",
-                "present but sets neither default-src nor script-src, so script "
-                "loading is left unrestricted",
-            )
-        )
+        findings.append(Finding("Content-Security-Policy", "csp-no-default-src"))
 
     wildcarded = sorted(
         name
@@ -448,52 +421,23 @@ def _analyze_csp(value):
     if wildcarded:
         findings.append(
             Finding(
-                "Content-Security-Policy",
-                "csp-wildcard",
-                "present but uses a wildcard source (*) in %s, allowing content "
-                "from any origin" % ", ".join(wildcarded),
+                "Content-Security-Policy", "csp-wildcard", {"directives": wildcarded}
             )
         )
 
     frame_ancestors = directives.get("frame-ancestors")
     if frame_ancestors is None:
-        findings.append(
-            Finding(
-                "Content-Security-Policy",
-                "csp-no-frame-ancestors",
-                "present but sets no frame-ancestors directive, so the page can "
-                "be framed by any origin",
-            )
-        )
+        findings.append(Finding("Content-Security-Policy", "csp-no-frame-ancestors"))
     elif "*" in frame_ancestors:
         findings.append(
-            Finding(
-                "Content-Security-Policy",
-                "csp-frame-ancestors-wildcard",
-                "present but sets frame-ancestors to *, so the page can be framed "
-                "by any origin, exactly as if the directive were absent",
-            )
+            Finding("Content-Security-Policy", "csp-frame-ancestors-wildcard")
         )
 
     if "object-src" not in directives and "default-src" not in directives:
-        findings.append(
-            Finding(
-                "Content-Security-Policy",
-                "csp-no-object-src",
-                "present but sets neither object-src nor default-src, so plugin "
-                "content is left unrestricted",
-            )
-        )
+        findings.append(Finding("Content-Security-Policy", "csp-no-object-src"))
 
     if "base-uri" not in directives:
-        findings.append(
-            Finding(
-                "Content-Security-Policy",
-                "csp-no-base-uri",
-                "present but sets no base-uri directive, so an injected <base> "
-                "tag can redirect every relative URL on the page",
-            )
-        )
+        findings.append(Finding("Content-Security-Policy", "csp-no-base-uri"))
 
     # A bare scheme where script comes from is barely narrower than no policy:
     # every host reachable over it qualifies.
@@ -519,12 +463,12 @@ def _analyze_csp(value):
             Finding(
                 "Content-Security-Policy",
                 "csp-plain-scheme",
-                "present but allows the bare scheme %s, so anything served over "
-                "it counts as an allowed source: every host on the web for "
-                "http: and https:, any attacker-authored payload for data:"
-                % ", ".join(
-                    "%s in %s" % (scheme, name) for name, scheme in sorted(schemed)
-                ),
+                {
+                    "schemes": [
+                        {"directive": name, "scheme": scheme}
+                        for name, scheme in sorted(schemed)
+                    ]
+                },
             )
         )
 
@@ -538,12 +482,7 @@ def _analyze_csp(value):
     )
     if insecure:
         findings.append(
-            Finding(
-                "Content-Security-Policy",
-                "csp-http-source",
-                "present but allows %s over plaintext HTTP, which anyone on the "
-                "path can replace" % ", ".join(insecure),
-            )
+            Finding("Content-Security-Policy", "csp-http-source", {"sources": insecure})
         )
 
     addresses = sorted(
@@ -557,11 +496,7 @@ def _analyze_csp(value):
     if addresses:
         findings.append(
             Finding(
-                "Content-Security-Policy",
-                "csp-ip-source",
-                "present but allows the IP address %s, which browsers do not "
-                "match against and which usually means a development entry "
-                "reached production" % ", ".join(addresses),
+                "Content-Security-Policy", "csp-ip-source", {"addresses": addresses}
             )
         )
 

@@ -61,8 +61,7 @@ def _analyze_coop(value):
             Finding(
                 "Cross-Origin-Opener-Policy",
                 "coop-unsafe-none",
-                "present but effectively unsafe-none (%s), which provides no "
-                "cross-origin isolation" % value.strip(),
+                {"value": value.strip()},
             )
         ]
     return []
@@ -75,21 +74,13 @@ def _analyze_coep(value):
             Finding(
                 "Cross-Origin-Embedder-Policy",
                 "coep-invalid",
-                "present but has an unrecognised value (%s); expected unsafe-none, "
-                "require-corp or credentialless" % value.strip(),
+                {"value": value.strip()},
             )
         ]
     # unsafe-none is the state a document is already in without the header, so
     # setting it explicitly opts into nothing.
     if bare == "unsafe-none":
-        return [
-            Finding(
-                "Cross-Origin-Embedder-Policy",
-                "coep-unsafe-none",
-                "present but set to unsafe-none, which is the default and embeds "
-                "cross-origin resources without requiring them to opt in",
-            )
-        ]
+        return [Finding("Cross-Origin-Embedder-Policy", "coep-unsafe-none")]
     return []
 
 
@@ -100,36 +91,19 @@ def _analyze_corp(value):
             Finding(
                 "Cross-Origin-Resource-Policy",
                 "corp-invalid",
-                "present but has an unrecognised value (%s); expected same-site, "
-                "same-origin or cross-origin" % value.strip(),
+                {"value": value.strip()},
             )
         ]
     # cross-origin permits exactly what no header at all permits.
     if bare == "cross-origin":
-        return [
-            Finding(
-                "Cross-Origin-Resource-Policy",
-                "corp-cross-origin",
-                "present but set to cross-origin, so it keeps no ordinary "
-                "embedder out; that is a deliberate opt-in for resources meant "
-                "to stay loadable by cross-origin isolated pages, and not a "
-                "restriction",
-            )
-        ]
+        return [Finding("Cross-Origin-Resource-Policy", "corp-cross-origin")]
     return []
 
 
 def _analyze_acao(value):
     origin = value.strip()
     if origin.lower() == "null":
-        return [
-            Finding(
-                "Access-Control-Allow-Origin",
-                "acao-null",
-                "present but set to null, which any sandboxed iframe or data: "
-                "URL can send as its Origin, so any page can read the response",
-            )
-        ]
+        return [Finding("Access-Control-Allow-Origin", "acao-null")]
     # The header carries one origin or the wildcard. A list is rejected outright,
     # which fails closed, but it also means the CORS the operator configured is
     # not happening at all.
@@ -138,21 +112,11 @@ def _analyze_acao(value):
             Finding(
                 "Access-Control-Allow-Origin",
                 "acao-multiple-origins",
-                "present but lists more than one origin (%s), which the header "
-                "does not allow, so browsers reject it and no cross-origin read "
-                "succeeds" % origin,
+                {"value": origin},
             )
         ]
     if origin == "*":
-        return [
-            Finding(
-                "Access-Control-Allow-Origin",
-                "acao-wildcard",
-                "present and set to *, so any origin may read the response; "
-                "that is deliberate for public assets and a leak for anything "
-                "user-specific",
-            )
-        ]
+        return [Finding("Access-Control-Allow-Origin", "acao-wildcard")]
     return []
 
 
@@ -181,16 +145,7 @@ def _analyze_isolation(present):
     opt in, and still gets no crossOriginIsolated.
     """
     if _grants_isolation(present) and not _seeks_isolation(present):
-        return [
-            Finding(
-                "Cross-Origin-Embedder-Policy",
-                "coep-no-isolation",
-                "present and opting in, but Cross-Origin-Opener-Policy is not "
-                "same-origin, so crossOriginIsolated stays false and the "
-                "SharedArrayBuffer-class APIs remain unavailable; expected for a "
-                "document meant to be embedded, since COOP is inert in a frame",
-            )
-        ]
+        return [Finding("Cross-Origin-Embedder-Policy", "coep-no-isolation")]
     return []
 
 
@@ -210,12 +165,4 @@ def _analyze_cors(present):
     """Findings about the CORS pair that neither header shows alone."""
     if not _shares_credentials_with_everyone(present):
         return []
-    return [
-        Finding(
-            "Access-Control-Allow-Origin",
-            "acao-credentials-wildcard",
-            "present as * alongside Access-Control-Allow-Credentials: true, a "
-            "combination browsers refuse outright, so every credentialed "
-            "cross-origin request fails",
-        )
-    ]
+    return [Finding("Access-Control-Allow-Origin", "acao-credentials-wildcard")]
