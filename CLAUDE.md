@@ -155,6 +155,29 @@ wins, so no suppression can be earned from it.
   `Secure`, and the `__Host-` / `__Secure-` prefix rules. The mapping already
   supports repeated headers, so the blocker is gone; findings will need to
   identify *which* cookie.
+- **The cache/cookie cross-header quirk — land it *with* the cookie parser, not
+  before.** RFC 9111 §7.3: "the Set-Cookie response header field does not inhibit
+  caching; a cacheable response with a Set-Cookie header field can be (and often
+  is) used to satisfy subsequent requests to caches." So `Cache-Control: public`
+  or `s-maxage` beside a `Set-Cookie` lets a shared cache hand one visitor's
+  cookie to the next. Tempting to write as a two-header rule today — don't. **No
+  header says a cookie is a session cookie.** On a `lang=en` this is not a
+  finding at all, and shipping it standalone means guessing. `HttpOnly`,
+  `SameSite`, and the `__Host-` / `__Secure-` prefixes are the signals that make
+  it worth reporting, and they only exist once the cookie parser does.
+- **`Pragma: no-cache` with nothing enforcing it** — same parcel, same reason: it
+  is the other half of "does the analyzer judge cache values at all", and
+  `find_cache_headers()` currently promises it does not. One code,
+  `pragma-ineffective`, `error`, cross-header, in `response.py`. It fires only
+  when no `Cache-Control` prevents storage. **Not a `DEPRECATED_HEADERS` entry**
+  even though RFC 9111 §5.4 does say "this specification deprecates Pragma": that
+  tuple means obsolete *security* headers whose absence is desired, and a
+  `pragma-deprecated` note would fire on OWASP's own recommended pairing of
+  `Cache-Control: no-store, max-age=0` with `Pragma: no-cache`. What makes the
+  narrow case judgeable at all is that intent is visible — a *missing*
+  `Cache-Control` says nothing about what the author wanted, a *present* `Pragma:
+  no-cache` says exactly what they wanted, and §5.4 says they did not get it:
+  "the meaning of `Pragma: no-cache` in responses was never specified".
 - **Active checks** — Origin reflection is the highest-value CORS test and needs a
   second request with a forged `Origin`. Tool work, not analysis.
 - **Inverted "interesting headers"** — report anything not on a *boring* list,
@@ -173,9 +196,15 @@ Read for ideas and reference, never copy.
 - `./tmp/headers-analyzer` — Burp plugin, read for ideas only
 - `./tmp/shcheck` — Tool that inspired the development of this one
 - `./tmp/shcheck-fork` — Fork of the previous tool with some minor improvements
+- `./tmp/www-project-secure-headers/` — OWASP Secure Headers documentation.
+  `mainsite/01_headers.md` is the per-header reference; `ci/headers_add.json` and
+  `ci/headers_remove.json` are machine-readable and CI-regenerated from the tables
+  in `mainsite/03_best_practices.md`, so read those two rather than the prose.
+  Several sections carry *browser tests they ran themselves* — worth more than the
+  recommendations around them
 
 ## Status
 
-74 codes (30 error / 23 warning / 21 note). 186 tests, 76 test functions, all
+77 codes (31 error / 25 warning / 21 note). 206 tests, 79 test functions, all
 passing; `ruff check` clean. `pyproject.toml` is a placeholder — hatchling, no
 README yet, `hstspreload` declared as the optional `[preload]` extra.

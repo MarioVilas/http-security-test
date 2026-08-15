@@ -157,6 +157,37 @@ ANALYZER_CASES = [
     ("Access-Control-Allow-Origin", "https://a.test https://b.test", ["acao-multiple-origins"]),
     ("Access-Control-Allow-Origin", "https://a.test, https://b.test", ["acao-multiple-origins"]),
     ("Access-Control-Allow-Origin", "*", ["acao-wildcard"]),
+    # Clear-Site-Data. The types are quoted strings and the quotes are load
+    # bearing: Chromium splits the header on commas, trims, and compares each
+    # token against a constant that includes them (net/url_request/
+    # clear_site_data.cc), so an unquoted type matches nothing and is dropped
+    # without complaint. A logout sending it clears nothing.
+    ("Clear-Site-Data", '"cache", "cookies", "storage"', []),
+    ("Clear-Site-Data", '"*"', []),
+    ("Clear-Site-Data", '"cookies"', []),
+    # whitespace around a member is trimmed, and quoting is all that matters
+    ("Clear-Site-Data", '  "cookies" ,"storage"  ', []),
+    ("Clear-Site-Data", "cookies", ["csd-unquoted"]),
+    ("Clear-Site-Data", "cache, cookies, storage", ["csd-unquoted"]),
+    ("Clear-Site-Data", "*", ["csd-unquoted"]),
+    # one quoted member is enough to keep the header working, so the unquoted
+    # one beside it is a partial defect rather than a dead header
+    ("Clear-Site-Data", '"cookies", storage', ["csd-unquoted"]),
+    # spec-defined but unimplemented is not the same as misspelled: Chromium
+    # has no executionContexts, and the spec has no storag
+    ("Clear-Site-Data", '"executionContexts"', []),
+    ("Clear-Site-Data", '"storag"', ["csd-unknown-type"]),
+    ("Clear-Site-Data", '"cookies", "storag"', ["csd-unknown-type"]),
+    # the comparison is byte-for-byte, so the camelCase spellings are the only
+    # ones that work and a plausible-looking "Cookies" clears nothing
+    ("Clear-Site-Data", '"Cookies"', ["csd-unknown-type"]),
+    ("Clear-Site-Data", '"clienthints"', ["csd-unknown-type"]),
+    # both defects at once come out worst-first
+    ("Clear-Site-Data", '"storag", cookies', ["csd-unquoted", "csd-unknown-type"]),
+    # the bucket form Chromium accepts, and the empty header that says nothing
+    ("Clear-Site-Data", '"storage:inbox"', []),
+    ("Clear-Site-Data", "", ["csd-empty"]),
+    ("Clear-Site-Data", "   ", ["csd-empty"]),
     # Deprecated headers
     ("Expect-CT", "max-age=86400, enforce", ["ect-deprecated"]),
     # Superseded, not dead: Chromium still enforces Feature-Policy, so a page
@@ -422,6 +453,51 @@ def test_stack_fingerprinting_headers_are_inventoried():
     assert headers.analyze("X-Generator", "Drupal 10") == []
 
 
+def test_mesh_and_tracing_headers_are_inventoried_too():
+    # The table is the union with OWASP's headers_remove.json, which reaches
+    # past version banners into service-mesh plumbing: correlation identifiers
+    # that map the internals, and per-hop latencies that time them.
+    response = {
+        "x-envoy-upstream-service-time": "12",
+        "x-b3-traceid": "80f198ee56343ba8",
+        "x-datadog-parent-id": "5678",
+        "x-kong-upstream-latency": "3",
+        "x-nextjs-matched-path": "/blog/[slug]",
+        "x-dtagentid": "abc",
+    }
+    found = headers.find_information_headers(response)
+    assert set(found) == {
+        "X-B3-TraceId",
+        "X-Datadog-Parent-Id",
+        "X-Envoy-Upstream-Service-Time",
+        "X-Kong-Upstream-Latency",
+        "X-Nextjs-Matched-Path",
+        "X-dtAgentId",
+    }
+    # still an inventory: a name on this table earns no finding by being there
+    assert headers.analyze_all(response, secure=True) == [
+        f for f in headers.analyze_all({}, secure=True)
+    ]
+
+
+def test_the_information_table_keeps_the_names_this_project_had():
+    # The union is not a replacement: OWASP's list lacks these four, and
+    # adopting theirs wholesale would have quietly dropped them.
+    assert set(headers.INFORMATION_HEADERS) >= {
+        "X-Drupal-Cache",
+        "X-Drupal-Dynamic-Cache",
+        "X-Rack-Cache",
+        "X-Runtime",
+    }
+
+
+def test_clear_site_data_is_never_reported_missing():
+    # It is what a logout endpoint sends, not something every response should
+    # carry, so its absence is not a gap on any page.
+    assert "Clear-Site-Data" not in headers.SECURITY_HEADERS
+    assert not [f for f in headers.analyze_all({}) if f.code.startswith("csd-")]
+
+
 def test_find_cache_headers_returns_canonical_names_and_values():
     assert headers.find_cache_headers(RESPONSE) == {"Cache-Control": "no-store"}
 
@@ -643,7 +719,7 @@ def test_severity_values_match_the_documented_policy():
     # The completeness tests above check only which codes are rated. These
     # anchor what they are rated, so a flipped value cannot land silently.
     counts = collections.Counter(headers.FINDING_SEVERITY.values())
-    assert counts == {"error": 30, "warning": 23, "note": 21}
+    assert counts == {"error": 31, "warning": 25, "note": 21}
     # An explicitly-defaulted header is rated exactly as its absence is, so
     # neither spelling of the same posture reads better than the other
     assert (
