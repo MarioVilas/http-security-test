@@ -49,6 +49,7 @@ DEPRECATED_HEADERS = (
     "Public-Key-Pins",
     "Public-Key-Pins-Report-Only",
     "X-Content-Security-Policy",
+    "X-DNS-Prefetch-Control",
     "X-Download-Options",
     "X-Permitted-Cross-Domain-Policies",
     "X-WebKit-CSP",
@@ -85,6 +86,29 @@ def _analyze_xdo(value):
             "xdo-deprecated",
             "present but only Internet Explorer read it, to stop a download "
             "being opened in the site's own origin; no current browser does",
+        )
+    ]
+
+
+def _analyze_xdpc(value):
+    # The odd one in this file: never standardised rather than withdrawn, which
+    # is why the code does not end in -deprecated. It is here because the table
+    # is what "do not reach for this" is spelled as, and because its absence is
+    # the desired state for the same reason as the rest -- there is nothing to
+    # report missing when only one browser reads it.
+    #
+    # Both values earn the same note. `on` asks for the behaviour browsers have
+    # anyway, and `off` is a real measure in the one engine that honours it, so
+    # neither is a defect and neither is a policy. OWASP recommends sending it;
+    # that recommendation is not contradicted here, only qualified.
+    return [
+        Finding(
+            "X-DNS-Prefetch-Control",
+            "xdpc-nonstandard",
+            "present but no specification defines it: browser testing finds DNS "
+            "prefetching is a Chromium behaviour and that only Chrome acts on "
+            "the header, so this is a Chrome-only measure rather than a policy "
+            "other engines can be expected to honour",
         )
     ]
 

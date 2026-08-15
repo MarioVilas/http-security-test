@@ -37,9 +37,10 @@ header rules cannot be split by family; they belong in `response.py`.
 `message.py` is the HTTP **message** model, not the response model. A request
 carries headers the same way, so a future `request.py` shares it.
 
-`X-Frame-Options`, `X-Content-Type-Options` and `Referrer-Policy` live in
-`response.py` because they have no family. That is the resting point, not a
-half-measure — a module each would be overkill.
+`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`,
+`Clear-Site-Data` and `Integrity-Policy` live in `response.py` because they have
+no family. That is the resting point, not a half-measure — a module each would
+be overkill.
 
 ## Design principles
 
@@ -68,7 +69,11 @@ These were expensive to arrive at. Do not quietly reverse them.
 7. **Code naming.** `<prefix>-deprecated` means "present, legacy, no defect".
    Known exception: `xfo-deprecated` (ALLOW-FROM) is rated `error` — a real
    defect. Renaming it to `xfo-allow-from` is still open and free until the codes
-   have consumers.
+   have consumers. The table and the code name are independent: membership of
+   `DEPRECATED_HEADERS` says "do not reach for this", the suffix says what is
+   wrong with it. `xdpc-nonstandard` is in that table without a `-deprecated`
+   code because X-DNS-Prefetch-Control was never standardised in the first
+   place, and calling that deprecated would be false.
 
 ## Invariants the test suite pins
 
@@ -148,6 +153,25 @@ wins, so no suppression can be earned from it.
 - `HSTS_MIN_MAX_AGE = 15552000` (180 days), chosen over the 6-month figure because
   Shodan shows 180 days is what sites actually send.
 - `info` was renamed `note` throughout, including theme keys, to match SARIF.
+- **`X-DNS-Prefetch-Control` is inventoried, never a gap.** It is in
+  `DEPRECATED_HEADERS` and emits one `note`, `xdpc-nonstandard`. No finding can
+  do better: OWASP's own browser testing (their issue #201) found DNS
+  prefetching is a Chromium behaviour and only Chrome acts on the header at all,
+  the local caniuse checkout has no feature entry for it, and `on` asks for the
+  default. So `off` is a real measure in one engine, `on` is a no-op, and
+  neither is a defect. Note that OWASP's `headers_add.json` *recommends* sending
+  it — the note qualifies that, it does not contradict it.
+- **`blocked-destinations=(style)` is treated as blocking nothing.** Chrome and
+  Safari do not implement it and Firefox only behind
+  `security.integrity_policy.stylesheet.enabled` (MDN BCD, matching OWASP's
+  hand-testing). This is browser-support data with a shelf life: recheck it
+  before trusting `IP_BLOCKING_DESTINATIONS`, and a style-only policy stops
+  being inert the day an engine ships it.
+- **Integrity-Policy's `endpoints` is unreliable in Firefox** — it enforces the
+  blocking from 145 but ignores the directive and logs violations to the console
+  instead (caniuse renders Firefox partial for exactly this; global support
+  ~81.6%). Deliberately *not* a code: it would fire on every correct policy that
+  asks for reports. `ip-endpoints-undefined` is the finding worth having.
 
 ## Parked, with intent to do
 
@@ -205,6 +229,6 @@ Read for ideas and reference, never copy.
 
 ## Status
 
-77 codes (31 error / 25 warning / 21 note). 206 tests, 79 test functions, all
+85 codes (34 error / 27 warning / 24 note). 235 tests, 87 test functions, all
 passing; `ruff check` clean. `pyproject.toml` is a placeholder — hatchling, no
 README yet, `hstspreload` declared as the optional `[preload]` extra.

@@ -188,8 +188,48 @@ ANALYZER_CASES = [
     ("Clear-Site-Data", '"storage:inbox"', []),
     ("Clear-Site-Data", "", ["csd-empty"]),
     ("Clear-Site-Data", "   ", ["csd-empty"]),
+    # Integrity-Policy. A structured field dictionary whose members are inner
+    # lists of tokens, and every case below is pinned by the cross-browser test
+    # suite (wpt/subresource-integrity/integrity-policy/parsing.html), which is
+    # worth more than the prose: several spellings that look right parse to
+    # nothing and enforce nothing.
+    ("Integrity-Policy", "blocked-destinations=(script)", []),
+    ("Integrity-Policy", "blocked-destinations=(script), sources=(inline)", []),
+    ("Integrity-Policy", "blocked-destinations=(script), endpoints=(ip-endpoint)", []),
+    # inner list items are separated by spaces; the comma habit from CSP and
+    # Permissions-Policy produces a header that parses to nothing
+    ("Integrity-Policy", "blocked-destinations=(script,style)", ["ip-invalid"]),
+    # ...as does a bare token, a quoted string, or an unclosed list
+    ("Integrity-Policy", "blocked-destinations=script", ["ip-invalid"]),
+    ("Integrity-Policy", 'blocked-destinations=("script")', ["ip-invalid"]),
+    ("Integrity-Policy", "blocked-destinations=('script')", ["ip-invalid"]),
+    ("Integrity-Policy", "blocked-destinations=(script", ["ip-invalid"]),
+    ("Integrity-Policy", "blocked-destinations=(script), sources=(invalid", ["ip-invalid"]),
+    # parses, but nothing is left that any browser acts on
+    ("Integrity-Policy", "", ["ip-no-blocked-destinations"]),
+    ("Integrity-Policy", "endpoints=(e)", ["ip-no-blocked-destinations"]),
+    ("Integrity-Policy", "blocked-destinations=()", ["ip-no-blocked-destinations"]),
+    ("Integrity-Policy", "blocked-destinations=(scripts)", ["ip-no-blocked-destinations"]),
+    # style is in the specification and in no engine, so alone it blocks nothing
+    ("Integrity-Policy", "blocked-destinations=(style)", ["ip-no-blocked-destinations"]),
+    # ...but beside a destination that works it costs nothing; script still blocks
+    ("Integrity-Policy", "blocked-destinations=(script style)", ["ip-style-unsupported"]),
+    ("Integrity-Policy", "blocked-destinations=(script scripts)", ["ip-unknown-destination"]),
+    # The trap. `sources` defaults to (inline) when absent, but once present it
+    # must say so: the browser appends inline only if the list is missing or
+    # already contains it, so a sources that omits it leaves nothing enforcing
+    # while blocked-destinations is spelled perfectly.
+    ("Integrity-Policy", "blocked-destinations=(script), sources=(telepathy)", ["ip-sources-without-inline"]),
+    ("Integrity-Policy", "blocked-destinations=(script), sources=()", ["ip-sources-without-inline"]),
+    # an extra token beside inline is ignored and costs nothing
+    ("Integrity-Policy", "blocked-destinations=(script), sources=(inline telepathy)", []),
     # Deprecated headers
     ("Expect-CT", "max-age=86400, enforce", ["ect-deprecated"]),
+    # Never standardised rather than withdrawn: OWASP's own browser testing
+    # found DNS prefetching is a Chromium behaviour and that only Chrome acts
+    # on the header at all, so it is a Chrome-only measure, not a policy.
+    ("X-DNS-Prefetch-Control", "off", ["xdpc-nonstandard"]),
+    ("X-DNS-Prefetch-Control", "on", ["xdpc-nonstandard"]),
     # Superseded, not dead: Chromium still enforces Feature-Policy, so a page
     # sending only this one is protected there and nowhere else
     ("Feature-Policy", "geolocation 'none'", ["fp-deprecated"]),
@@ -491,6 +531,21 @@ def test_the_information_table_keeps_the_names_this_project_had():
     }
 
 
+def test_x_dns_prefetch_control_is_inventoried_as_one_to_drop():
+    # It sits in the deprecated table without a -deprecated code: never
+    # standardised is not the same as withdrawn, and the note says which.
+    assert "X-DNS-Prefetch-Control" in headers.DEPRECATED_HEADERS
+    found = headers.find_deprecated_headers({"x-dns-prefetch-control": "off"})
+    assert found == {"X-DNS-Prefetch-Control": "off"}
+
+
+def test_integrity_policy_is_never_reported_missing():
+    # Enforcing it means every script and stylesheet must carry integrity
+    # metadata, which is a deployment commitment rather than a switch.
+    assert "Integrity-Policy" not in headers.SECURITY_HEADERS
+    assert not [f for f in headers.analyze_all({}) if f.code.startswith("ip-")]
+
+
 def test_clear_site_data_is_never_reported_missing():
     # It is what a logout endpoint sends, not something every response should
     # carry, so its absence is not a gap on any page.
@@ -693,6 +748,9 @@ def _every_code_headers_can_emit():
     codes |= {f.code for f in headers.analyze_all(BOTH)}
     codes |= {f.code for f in headers.analyze_all(WILDCARD_WITH_CREDENTIALS)}
     codes |= {f.code for f in headers.analyze_all(REPORT_ONLY_ONLY)}
+    # ...and ip-endpoints-undefined needs a policy naming a group beside a
+    # Reporting-Endpoints header that does not define it
+    codes |= {f.code for f in headers.analyze_all(REPORTS_NOWHERE)}
     codes |= {f.code for f in headers.analyze_all({"x-frame-options": ["DENY", "SAMEORIGIN"]})}
     # hsts-not-preloaded needs the optional preload list to be emittable at all
     with mock.patch.object(hsts, "hstspreload", FakePreloadList()):
@@ -719,7 +777,7 @@ def test_severity_values_match_the_documented_policy():
     # The completeness tests above check only which codes are rated. These
     # anchor what they are rated, so a flipped value cannot land silently.
     counts = collections.Counter(headers.FINDING_SEVERITY.values())
-    assert counts == {"error": 31, "warning": 25, "note": 21}
+    assert counts == {"error": 34, "warning": 27, "note": 24}
     # An explicitly-defaulted header is rated exactly as its absence is, so
     # neither spelling of the same posture reads better than the other
     assert (
@@ -848,6 +906,7 @@ REPORT_ONLY_ONLY = {
     "content-security-policy-report-only": "default-src 'none'",
     "cross-origin-embedder-policy-report-only": 'require-corp; report-to="coep"',
     "cross-origin-opener-policy-report-only": "same-origin",
+    "integrity-policy-report-only": "blocked-destinations=(script)",
 }
 
 
@@ -860,6 +919,7 @@ def test_a_policy_only_in_report_only_mode_is_reported():
         "coep-ro-unenforced",
         "coop-ro-unenforced",
         "csp-ro-unenforced",
+        "ip-ro-unenforced",
     ]
 
 
@@ -870,8 +930,54 @@ def test_report_only_beside_an_enforcing_policy_is_ordinary_practice():
         "content-security-policy": "default-src 'self'",
         "cross-origin-embedder-policy": "require-corp",
         "cross-origin-opener-policy": "same-origin",
+        "integrity-policy": "blocked-destinations=(script)",
     })
     assert unenforced_codes(present) == []
+
+
+# ---------------------------------------------------------------------------
+# Integrity-Policy reporting
+# ---------------------------------------------------------------------------
+# The endpoints directive carries group names; the URLs behind them live in a
+# Reporting-Endpoints header. Neither header can answer this alone.
+
+REPORTS_NOWHERE = {"integrity-policy": "blocked-destinations=(script), endpoints=(sri)"}
+
+
+def ip_codes(present):
+    return sorted(f.code for f in headers.analyze_all(present) if f.code.startswith("ip-"))
+
+
+def test_a_reporting_group_nothing_defines_is_reported():
+    assert ip_codes(REPORTS_NOWHERE) == ["ip-endpoints-undefined"]
+
+
+def test_a_defined_reporting_group_is_ordinary_practice():
+    present = dict(REPORTS_NOWHERE, **{"reporting-endpoints": 'sri="https://example.test/r"'})
+    assert ip_codes(present) == []
+
+
+def test_only_the_named_group_counts():
+    # a Reporting-Endpoints header that defines some other group leaves this
+    # policy reporting into nothing just as surely as no header at all
+    present = dict(REPORTS_NOWHERE, **{"reporting-endpoints": 'csp="https://example.test/r"'})
+    assert ip_codes(present) == ["ip-endpoints-undefined"]
+
+
+def test_a_policy_that_names_no_endpoints_is_not_asked_about_reporting():
+    assert ip_codes({"integrity-policy": "blocked-destinations=(script)"}) == []
+
+
+def test_an_unparseable_policy_is_not_also_asked_about_reporting():
+    # it enforces nothing, so where it would have reported decides nothing
+    assert ip_codes({"integrity-policy": "blocked-destinations=script"}) == ["ip-invalid"]
+
+
+def test_the_report_only_spelling_is_left_alone():
+    # principle: report-only content is never analyzed, even where the same
+    # defect in it would arguably matter more
+    present = {"integrity-policy-report-only": "blocked-destinations=(script), endpoints=(sri)"}
+    assert "ip-endpoints-undefined" not in ip_codes(present)
 
 
 def test_the_content_of_a_report_only_header_is_not_judged():

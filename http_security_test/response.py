@@ -24,6 +24,8 @@ ones present mean together, and which findings a sibling header has already made
 moot. The headers that belong to no family are judged here too.
 """
 
+import re
+
 from .csp import _analyze_csp, _analyze_csp_all, parse_csp
 from .findings import Finding
 from .hsts import _analyze_hsts, _analyze_preload
@@ -45,6 +47,7 @@ from .legacy import (
     _analyze_p3p,
     _analyze_xcsp,
     _analyze_xdo,
+    _analyze_xdpc,
     _analyze_xpcdp,
     _analyze_xwkcsp,
     _analyze_xxp,
@@ -117,6 +120,10 @@ REPORT_ONLY_HEADERS = {
     "Cross-Origin-Opener-Policy-Report-Only": (
         "Cross-Origin-Opener-Policy",
         "coop-ro-unenforced",
+    ),
+    "Integrity-Policy-Report-Only": (
+        "Integrity-Policy",
+        "ip-ro-unenforced",
     ),
 }
 
@@ -260,6 +267,70 @@ CSD_TYPES = frozenset(
 CSD_BUCKET_PREFIX = "storage:"
 
 
+# Integrity-Policy asks the browser to refuse any <script> or stylesheet that
+# carries no integrity attribute, which makes it the one header here that can
+# turn Subresource Integrity from an option into a rule.
+#
+# The value is a structured field dictionary whose members are inner lists of
+# tokens, and browsers parse it whole or not at all. The cases below are pinned
+# by the cross-browser suite at wpt/subresource-integrity/integrity-policy/
+# parsing.html rather than by reading the grammar, because several spellings
+# that look correct enforce nothing: a bare token instead of an inner list,
+# quoted strings instead of tokens, and -- the easy one to write by habit --
+# commas inside the list where the syntax wants spaces.
+IP_DIRECTIVES = frozenset(["blocked-destinations", "endpoints", "sources"])
+
+
+IP_DESTINATIONS = frozenset(["script", "style"])
+
+
+# What any engine actually blocks on today. `style` is in the specification and
+# in nobody's implementation: Chrome and Safari do not support it and Firefox
+# only behind security.integrity_policy.stylesheet.enabled (MDN BCD, checked
+# against OWASP's own browser testing). Recheck before treating a style-only
+# policy as inert -- this is the sort of entry that goes stale.
+IP_BLOCKING_DESTINATIONS = frozenset(["script"])
+
+
+# `sources` names where integrity metadata may come from, and inline -- the
+# attribute on the tag -- is the only value defined. The default is (inline),
+# but only when the directive is absent: a browser appends inline if the list
+# is missing or already contains it, so a list that omits it leaves nothing.
+IP_SOURCE_INLINE = "inline"
+
+
+# sf-token: ( ALPHA / "*" ) *( tchar / ":" / "/" ). The leading character is
+# what rejects "script" and 'script' -- a quoted string is not a token, and a
+# member that is not a token makes the whole dictionary unparseable.
+_IP_TOKEN = re.compile(r"[A-Za-z*][A-Za-z0-9!#$%&'*+\-.^_`|~:/]*\Z")
+
+
+def parse_integrity_policy(value):
+    """Parse an Integrity-Policy header into a {directive: [token, ...]} mapping.
+
+    Returns None when the value is not a well formed dictionary of inner lists,
+    which is the answer that matters most: a header that does not parse is not
+    a weaker policy, it is no policy, and it looks identical in a response.
+    """
+    policy = {}
+    for chunk in value.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        name, sep, items = chunk.partition("=")
+        name = name.strip().lower()
+        items = items.strip()
+        if not sep or not name:
+            return None
+        if not (items.startswith("(") and items.endswith(")")):
+            return None
+        tokens = items[1:-1].split()
+        if not all(_IP_TOKEN.match(token) for token in tokens):
+            return None
+        policy[name] = tokens
+    return policy
+
+
 # Cache control headers.
 CACHE_HEADERS = (
     "Cache-Control",
@@ -391,6 +462,85 @@ def _analyze_csd(value):
     return findings
 
 
+def _analyze_ip(value):
+    """Findings for Integrity-Policy.
+
+    Absence is never reported. Enforcing it means every script and stylesheet
+    the page loads must carry integrity metadata, which is a deployment
+    commitment rather than a header to switch on, so a page without one is in
+    the ordinary state of the web.
+    """
+    policy = parse_integrity_policy(value)
+    if policy is None:
+        return [
+            Finding(
+                "Integrity-Policy",
+                "ip-invalid",
+                "present but is not a dictionary of inner lists (%s); browsers "
+                "parse the header whole or not at all, so nothing is enforced. "
+                "The items of a list are separated by spaces, not commas, and "
+                "are bare tokens rather than quoted strings" % value.strip(),
+            )
+        ]
+
+    destinations = policy.get("blocked-destinations", [])
+    blocking = [name for name in destinations if name in IP_BLOCKING_DESTINATIONS]
+    if not blocking:
+        if not destinations:
+            detail = "names no destination to block"
+        else:
+            detail = "names only %s, which no engine blocks on" % ", ".join(
+                destinations
+            )
+        return [
+            Finding(
+                "Integrity-Policy",
+                "ip-no-blocked-destinations",
+                "present but %s, so every script and stylesheet still loads "
+                "without integrity metadata" % detail,
+            )
+        ]
+
+    # Once the policy enforces nothing, what its other directives say decides
+    # nothing either, so this answers before the remarks below.
+    sources = policy.get("sources")
+    if sources is not None and IP_SOURCE_INLINE not in sources:
+        return [
+            Finding(
+                "Integrity-Policy",
+                "ip-sources-without-inline",
+                "present but sources is set to (%s) and does not include "
+                "inline, and the browser supplies that default only when the "
+                "directive is absent, so the policy enforces nothing despite "
+                "naming a destination" % " ".join(sources),
+            )
+        ]
+
+    findings = []
+    unknown = sorted(set(destinations) - IP_DESTINATIONS)
+    if unknown:
+        findings.append(
+            Finding(
+                "Integrity-Policy",
+                "ip-unknown-destination",
+                "present but blocked-destinations names %s, which is not a "
+                "request destination the policy defines, so that entry is "
+                "ignored" % ", ".join(unknown),
+            )
+        )
+    if "style" in destinations:
+        findings.append(
+            Finding(
+                "Integrity-Policy",
+                "ip-style-unsupported",
+                "present and asks for style, which no engine implements yet -- "
+                "Firefox only behind a preference; the script destination "
+                "beside it is unaffected",
+            )
+        )
+    return findings
+
+
 _ANALYZERS = {
     "clear-site-data": _analyze_csd,
     "content-security-policy": _analyze_csp,
@@ -400,10 +550,12 @@ _ANALYZERS = {
     "access-control-allow-origin": _analyze_acao,
     "expect-ct": _analyze_ect,
     "feature-policy": _analyze_fp,
+    "integrity-policy": _analyze_ip,
     "p3p": _analyze_p3p,
     "public-key-pins": _analyze_hpkp,
     "public-key-pins-report-only": _analyze_hpkp_report_only,
     "x-content-security-policy": _analyze_xcsp,
+    "x-dns-prefetch-control": _analyze_xdpc,
     "x-download-options": _analyze_xdo,
     "x-webkit-csp": _analyze_xwkcsp,
     "referrer-policy": _analyze_rp,
@@ -527,6 +679,53 @@ def _analyze_report_only(present):
     return findings
 
 
+def _reporting_endpoint_names(present):
+    """The group names a Reporting-Endpoints header defines."""
+    names = set()
+    for value in _lookup_all(present, "Reporting-Endpoints"):
+        for chunk in value.split(","):
+            name, sep, _url = chunk.partition("=")
+            if sep:
+                names.add(name.strip())
+    return names
+
+
+def _analyze_ip_reporting(present):
+    """Reporting groups Integrity-Policy names that nothing defines.
+
+    The endpoints directive carries group names, not URLs; the URLs live in a
+    Reporting-Endpoints header. Name a group that header does not define and
+    the policy still blocks, but every violation it catches goes nowhere -- and
+    a violation report is the whole reason to deploy this before enforcing it.
+
+    Only the enforcing header is read. The report-only spelling is left alone
+    on principle, even though the same defect there is arguably worse.
+    """
+    value = _sole_value(present, "Integrity-Policy")
+    if value is None:
+        return []
+    policy = parse_integrity_policy(value)
+    if not policy:
+        return []
+    wanted = policy.get("endpoints", [])
+    if not wanted:
+        return []
+    undefined = [
+        name for name in wanted if name not in _reporting_endpoint_names(present)
+    ]
+    if not undefined:
+        return []
+    return [
+        Finding(
+            "Integrity-Policy",
+            "ip-endpoints-undefined",
+            "present and reports to %s, which no Reporting-Endpoints header "
+            "defines, so violations are caught and never delivered"
+            % ", ".join(undefined),
+        )
+    ]
+
+
 def _suppress_redundant(findings, present):
     """Drop findings a sibling header has already made moot.
 
@@ -586,6 +785,7 @@ def analyze_all(present, secure=True, host=None):
     findings.extend(_analyze_isolation(present))
     findings.extend(_analyze_policy_overlap(present))
     findings.extend(_analyze_cors(present))
+    findings.extend(_analyze_ip_reporting(present))
     findings.extend(_analyze_report_only(present))
     findings.extend(_analyze_duplicates(present))
     findings.extend(_analyze_preload(present, host))
