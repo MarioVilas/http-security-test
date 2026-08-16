@@ -228,8 +228,13 @@ suppression applies.
 
 - **Verify, don't assert.** Several confident claims this project ran on turned
   out false under test — including mine and the human's. Check stdlib behaviour
-  with a constructed response; check browser support against the local caniuse
-  checkout; check a "this is unused" hunch by grepping call sites.
+  with a constructed response; check a "this is unused" hunch by grepping call
+  sites; check browser support against **MDN BCD first** (`caniuse` alone
+  cannot answer most header questions — see the reference section), and check
+  what sites really send against OWASP's 250 000-domain corpus instead of
+  recalling a figure. One rationale here was already wrong on exactly this
+  point and stood for weeks because nothing on disk could contradict it; now
+  something can.
 - **Mutation-test new guards.** Break the code, confirm the test fails, restore.
   A test that passes both ways is worse than none. This has paid for itself
   twice; most recently a guard returning `None` instead of `""` survived every
@@ -271,10 +276,17 @@ suppression applies.
 - **Not embedded:** csp-evaluator's 171-entry JSONP/Angular bypass lists — high
   catch rate, but curated data that ages, and the module has no upkeep burden
   today. The data-free checks from it *were* ported.
-- `noopener-allow-popups` is accepted as a valid COOP value (caniuse: ~84%,
-  Chromium and Safari; Firefox absent).
-- `HSTS_MIN_MAX_AGE = 15552000` (180 days), chosen over the 6-month figure because
-  Shodan shows 180 days is what sites actually send.
+- `noopener-allow-popups` is accepted as a valid COOP value. MDN BCD:
+  Chrome 131, Safari 18.4, Firefox `false` (and `webview_android` `false`).
+  The "~84 %" this used to cite came off caniuse.com, which renders BCD; the
+  versions above are the on-disk fact and the ones to recheck.
+- `HSTS_MIN_MAX_AGE = 15552000` (180 days), chosen over the 6-month figure
+  because it is what sites actually send. Now measured rather than recalled:
+  of the 55 349 `Strict-Transport-Security` values carrying a `max-age` in
+  OWASP's 250 000-domain corpus (`subprojects/data/data.db`, see the reference
+  section), **86.1 % are ≥ 180 days**, so this threshold contradicts 13.9 % of
+  live deployments where a 1-year threshold would contradict 26.4 %. 1 105
+  send `max-age=0`. Re-run the query there before moving the constant.
 - `info` was renamed `note` throughout, including theme keys, to match SARIF.
 - **From the OWASP cheat sheet, and settled — do not re-propose from it:**
   `X-Robots-Tag` is inventory at most, never a finding (not browser-enforced,
@@ -290,23 +302,41 @@ suppression applies.
   line and a 204 or 304 carries no representation.
 - **`X-DNS-Prefetch-Control` is inventoried, never a gap.** It is in
   `DEPRECATED_HEADERS` and emits one `note`, `xdpc-nonstandard`. No finding can
-  do better: OWASP's own browser testing (their issue #201) found DNS
-  prefetching is a Chromium behaviour and only Chrome acts on the header at all,
-  the local caniuse checkout has no feature entry for it, and `on` asks for the
-  default. So `off` is a real measure in one engine, `on` is a no-op, and
-  neither is a defect. Note that OWASP's `headers_add.json` *recommends* sending
-  it — the note qualifies that, it does not contradict it.
+  do better: MDN BCD has it as Chrome 1 and Firefox 2 with no partial or pref
+  caveat on either, Safari never, and `on` asks for the default everywhere it
+  works — in Firefox both `network.dns.disablePrefetch` and
+  `network.dns.disablePrefetchFromHTTPS` default to `false`. So `off` is a real
+  measure in two engines, `on` is a no-op, and neither is a defect. BCD also
+  records `standard_track: false, deprecated: false`, which is exactly what
+  `xdpc-nonstandard` names and why it carries no `-deprecated` suffix. Note
+  that OWASP's `headers_add.json` *recommends* sending it — the note qualifies
+  that, it does not contradict it.
+  **Rationale corrected 2026-08-16, conclusion unchanged.** This used to read
+  "only Chrome acts on the header at all", from OWASP's hand-testing in their
+  issue #201, plus "the local caniuse checkout has no feature entry for it".
+  BCD contradicts the first and supersedes the second. Nothing in the code
+  moved, because the verdict never depended on how many engines honour it —
+  only on `on` being the default in all of them. If you find issue #201 again,
+  this is the paragraph that already accounts for it.
 - **`blocked-destinations=(style)` is treated as blocking nothing.** Chrome and
   Safari do not implement it and Firefox only behind
   `security.integrity_policy.stylesheet.enabled` (MDN BCD, matching OWASP's
   hand-testing). This is browser-support data with a shelf life: recheck it
   before trusting `IP_BLOCKING_DESTINATIONS`, and a style-only policy stops
-  being inert the day an engine ships it.
+  being inert the day an engine ships it. Rechecking is one file —
+  the `blocked-destinations_style` node of
+  `documentation/browser-compat-data/http/headers/Integrity-Policy.json`.
+  Verified still true 2026-08-16: Chrome `false`, Safari `false`, Firefox 142
+  pref-gated, against `blocked-destinations_script` at Chrome 138 /
+  Firefox 145 / Safari 26.
 - **Integrity-Policy's `endpoints` is unreliable in Firefox** — it enforces the
-  blocking from 145 but ignores the directive and logs violations to the console
-  instead (caniuse renders Firefox partial for exactly this; global support
-  ~81.6%). Deliberately *not* a code: it would fire on every correct policy that
-  asks for reports. `ip-endpoints-undefined` is the finding worth having.
+  blocking from 145 but ignores the directive and logs violations to the
+  console instead. MDN BCD carries this as `partial_implementation: true` on
+  Firefox with the note "Reporting `endpoints` are ignored (violations are
+  logged to console)"; the "~81.6 % global support" figure came off
+  caniuse.com, which renders BCD and is not the same as the caniuse checkout.
+  Deliberately *not* a code: it would fire on every correct policy that asks
+  for reports. `ip-endpoints-undefined` is the finding worth having.
 
 ## Parked, with intent to do
 
@@ -315,6 +345,16 @@ suppression applies.
   gone: the mapping supports repeated headers, and `identity()` means a code can
   fire more than once against one header without the second being deduped away.
   Put the cookie's name in `data` so two cookies are two findings.
+  Scope note from MDN BCD's `http/headers/Set-Cookie.json`, which breaks the
+  header down by attribute and is the place to settle this before writing
+  codes: there is now a **third** name prefix in the wild,
+  `__Host-Http-` (BCD node `http_host-http_prefixes`, Chrome 140, Firefox 143,
+  Safari `false`; Firefox 142 shipped it briefly as `__HostHttp-`). The two the
+  item was written around are `host_secure_prefixes`, Chrome 49 / Firefox 50 /
+  Safari 13 — universally supported, so a prefix violation is a real defect
+  everywhere. `Partitioned` (CHIPS) is Chrome 114 / Firefox 141 / Safari 26.2
+  and is *not* a security defect either way. Read the spec for `__Host-Http-`
+  before rating it; BCD gives support, not semantics.
 - **The cache/cookie cross-header quirk — land it *with* the cookie parser, not
   before.** RFC 9111 §7.3: "the Set-Cookie response header field does not inhibit
   caching; a cacheable response with a Set-Cookie header field can be (and often
@@ -338,6 +378,13 @@ suppression applies.
   `Cache-Control` says nothing about what the author wanted, a *present* `Pragma:
   no-cache` says exactly what they wanted, and §5.4 says they did not get it:
   "the meaning of `Pragma: no-cache` in responses was never specified".
+  **Neither of these two can be sized from OWASP's corpus**, and the check is
+  not worth repeating: it collects 17 header names and `set-cookie` and
+  `pragma` are not among them, so how often the pairings actually occur is
+  unmeasurable from disk. What *is* there is 101 728 domains' worth of raw
+  `cache-control` values — enough to write and sanity-check the "no
+  `Cache-Control` prevents storage" condition against real directives rather
+  than invented ones.
 - **Active checks** — Origin reflection is the highest-value CORS test and needs a
   second request with a forged `Origin`. Tool work, not analysis.
 - **Inverted "interesting headers"** — report anything not on a *boring* list,
