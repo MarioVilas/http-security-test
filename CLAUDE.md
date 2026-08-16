@@ -355,10 +355,206 @@ suppression applies.
 
 ## Reference material on disk
 
-For reading and analysis only, do not copy. They can be found at ´/home/crapula/ref´
-under various subdirectories, each subdirectory categorizes the kind of material.
-All are git repositories, so git commands may be used to inspect the history if needed.
-They are all third party repositories, so no write operations.
+For reading and analysis only, do not copy. They live at
+`/home/crapula/ref/<category>/<repo>`, the subdirectory naming the kind of
+material. All third-party, all read-only — no write operations, ever. All are
+git checkouts except `web_browsers/lynx2.9.3`, which is an unpacked tarball, so
+`git log` / `git show` are available for history on the rest.
+
+The survey below was done once and is meant to save the next agent from
+redoing it; the paths and the claims about them were verified, not assumed.
+Sizes matter here — `web_browsers/WebKit` is 6.4 GB and
+`operating_systems/nt5src` is 7.1 GB, so scope every `grep` to a subdirectory.
+
+### Primary — reach for these first
+
+**`documentation/www-project-secure-headers`** — the OWASP Secure Headers
+Project, upstream of most of this package's header set and of several settled
+rulings above.
+
+- `mainsite/01_headers.md` and `mainsite/03_best_practices.md` — the header
+  list and the recommended values. `03_best_practices.md` is the **source of
+  truth**; the two JSONs below are generated from its tables by CI.
+- `ci/headers_add.json` — 13 headers with OWASP's recommended values.
+- `ci/headers_remove.json` — **87 information-leakage header names** OWASP says
+  to strip (`X-Powered-By`, `X-AspNet-Version`, the Envoy/Datadog/B3 tracing
+  set, …). This is the closest thing on disk to prior art for the parked
+  *inverted "interesting headers"* switch.
+- `mainsite/02_browser_support.md` — one caniuse URL per header. Note how many
+  are `mdn-*` URLs; see the caniuse caveat below before trusting the checkout
+  to answer them.
+- `mainsite/04_technical_resources.md` — the other tools in this space.
+- `mainsite/07_statistics.md` — the published prevalence charts, **PNG images
+  only**, so useless to read programmatically. Use the database instead:
+- `subprojects/data/data.db` — **the real-world corpus, and the most valuable
+  single file in `/home/crapula/ref`.** 79 MB of SQLite, fetched by hand from
+  the project's GitHub Release assets (CI generates it, local generation does
+  not work). One table and it holds raw *values*, not just counts:
+
+  ```sql
+  CREATE TABLE stats (id integer PRIMARY KEY, domain text,
+                      http_header_name text, http_header_value text);
+  ```
+
+  684 485 rows over **250 000 domains** — the Majestic top-1M prefix, with
+  `input.csv` beside it as the domain list. Three things to know before
+  quoting a number from it:
+  - **Only the 17 headers OSHP tracks** appear (`cache-control`,
+    `x-frame-options`, `x-content-type-options`, `referrer-policy`,
+    `strict-transport-security`, `content-security-policy`, the three
+    `cross-origin-*`, `permissions-policy`, `x-xss-protection`,
+    `x-permitted-cross-domain-policies`, `content-security-policy-report-only`,
+    `x-dns-prefetch-control`, `expect-ct`, `public-key-pins`,
+    `clear-site-data`). It is **not** a corpus for the "interesting headers"
+    work — no `Server`, no `X-Powered-By`, no `Set-Cookie`.
+  - A domain with no security header at all still gets one row, with
+    `http_header_name IS NULL`. That is 110 982 of the 250 000; the other
+    139 018 have at least one. Filter `http_header_name IS NOT NULL` or every
+    ratio comes out wrong.
+  - The path is `subprojects/data/`, one level above the
+    `subprojects/statistics/data/` that `scripts/*.py` reads as `../data`.
+    Irrelevant for querying it directly; it means the repo's own scripts will
+    not find it.
+
+  This is the first thing on disk that can settle a threshold empirically.
+  Worked example — the `HSTS_MIN_MAX_AGE` question, over the 55 349 HSTS
+  values carrying a `max-age`: 86.1 % are ≥ 180 days, so the current threshold
+  contradicts 13.9 % of live deployments, while a 1-year threshold would
+  contradict 26.4 % (and 1 105 send `max-age=0`). Prefer this over recalling a
+  figure from Shodan or a blog.
+- `subprojects/validator/tests_suite.yml` — a Venom suite asserting OSHP
+  conformance against a live site. Useful as an independent opinion to diff
+  verdicts against.
+- The repo carries its own `CLAUDE.md`, including strict GenAI rules. Those
+  govern *contributing there*, not reading it from here.
+
+**`documentation/browser-compat-data`** and **`documentation/caniuse`** —
+browser support, in two halves that answer different questions. Use them
+together; using one alone is how a wrong support claim gets made.
+
+- **MDN BCD (`browser-compat-data`) says *whether*.** `http/headers/` holds one
+  JSON per header, 160 of them, named exactly as the header is
+  (`Integrity-Policy.json`, `Cross-Origin-Opener-Policy.json`,
+  `Set-Cookie.json`, `X-DNS-Prefetch-Control.json`, …). Sub-keys carry
+  *per-directive and per-value* support, which is the granularity this package
+  reasons at and which caniuse does not have. A support entry can say
+  `version_added: false`, `partial_implementation: true` with a `notes` string,
+  or `flags: [{type: preference, name: …}]` for pref-gated — all three
+  distinctions matter here. `"mirror"` means "same as the parent engine's
+  browser", not "unknown".
+- **caniuse says *how much*.** `data.json` / `features-json/` carry only
+  caniuse's own 554 features and **no `mdn-*` entries** — anything caniuse.com
+  shows as `mdn-http_headers_*` is BCD rendered on their site, not data in this
+  checkout. What is here natively: `contentsecuritypolicy`,
+  `contentsecuritypolicy2`, `stricttransportsecurity`, `x-frame-options`,
+  `referrer-policy`, `permissions-policy`, `feature-policy`, `document-policy`,
+  `upgradeinsecurerequests`, `cors`, `same-site-cookie-attribute`,
+  `subresource-integrity`, with `usage_perc_y` / `usage_perc_a` per feature
+  (`x-frame-options` is 0.28 % `y` + 96.41 % `a`, the whole deprecation story
+  in two numbers).
+- **To recompute a global support percentage for a header BCD covers but
+  caniuse does not** — the "~81.6 %" sort of figure — join BCD's
+  `version_added` against `caniuse/region-usage-json/alt-ww.json`, which is
+  worldwide usage share per browser per version (its `total` is 96.44, not 100,
+  so normalise or say "of tracked traffic").
+
+Three rulings in "Deliberately decided" were re-verified against BCD and all
+three hold exactly as written — `Integrity-Policy` is
+`partial_implementation` in Firefox 145 with the note "Reporting `endpoints`
+are ignored (violations are logged to console)";
+`blocked-destinations_style` is `false` in Chrome and Safari and Firefox 142
+behind `security.integrity_policy.stylesheet.enabled`; COOP
+`noopener-allow-popups` is Chrome 131 / Safari 18.4 / Firefox `false`. Recheck
+them there, not from memory.
+
+**`documentation/rfc-library`** — the full RFC/STD/BCP/FYI archive as plain
+text, laid out `rfc/NNNNN-NNNNN/rfcNNNN.txt`, with `indexes/rfc-index.txt` to
+search by title. The ones this package reasons from: **9110** (HTTP
+semantics), **9111** (caching — §5.4 on `Pragma`, §7.3 on `Set-Cookie` and
+shared caches, both quoted in the parked items), **6797** (HSTS), **6265**
+(cookies), **7034** (`X-Frame-Options`).
+
+**`web_browsers/firefox`** and **`web_browsers/WebKit`** — ground truth for
+*"does a browser actually honour this"*, which principle 5 and every
+deprecation ruling turn on. Two engines only; there is no Chromium checkout,
+so a Chromium claim still needs an external source.
+
+- Firefox: `dom/security/nsCSPParser.cpp`, `dom/security/nsCSPUtils.cpp`,
+  `security/manager/ssl/nsSiteSecurityService.cpp` (HSTS),
+  `dom/security/featurepolicy/`, `dom/security/IntegrityPolicy.cpp`, and
+  `modules/libpref/init/StaticPrefList.yaml` for what is behind a pref.
+- WebKit: `Source/WebCore/page/csp/ContentSecurityPolicy*.cpp`,
+  `Source/WebCore/loader/CrossOriginOpenerPolicy.cpp`,
+  `Source/WebCore/loader/CrossOriginEmbedderPolicy.h`.
+- Both browser-support claims in "Deliberately decided" were re-verified
+  against these checkouts: `security.integrity_policy.stylesheet.enabled` is
+  real (`StaticPrefList.yaml:19276`, beside `security.integrity_policy.enabled`
+  at 19271), and `noopener-allow-popups` is parsed in WebKit
+  (`CrossOriginOpenerPolicy.cpp:237`) and appears nowhere in Firefox. This is
+  the cheap way to recheck them when the shelf life runs out.
+
+**`security/csp-evaluator`** — the source of the ported CSP checks.
+`checks/security_checks.ts`, `checks/strictcsp_checks.ts` and
+`checks/parser_checks.ts` are the checks themselves;
+`allowlist_bypasses/{jsonp,angular,flash}.ts` is the curated data deliberately
+*not* embedded here.
+
+**`security/hstspreload`** — the source of the declared `[preload]` extra, so
+the behaviour of the only third-party dependency is readable. One public
+function, `in_hsts_preload(host)`; the list is a packed `hstspreload.bin`
+rebuilt monthly from Chromium's `transport_security_state_static.json`.
+
+### Secondary — for specific parked work
+
+- **`Set-Cookie` analysis.** Jetty's
+  `jetty-core/jetty-http/src/main/java/org/eclipse/jetty/http/HttpCookieStore.java`
+  implements the `__Host-` / `__Secure-` prefix rules, with
+  `HttpCookieStoreTest.java` beside it; Tomcat's
+  `java/org/apache/tomcat/util/http/Rfc6265CookieProcessor.java` plus
+  `SameSiteCookies.java` and `test/…/TestCookieProcessorGeneration.java` are
+  the serialization ground truth; `werkzeug/tests/test_http.py` has prefix
+  tests in Python. Read these three when the cookie parser lands, not before.
+- **Prior art on defaults.** Tomcat's
+  `java/org/apache/catalina/filters/HttpHeaderSecurityFilter.java` (HSTS
+  max-age, XFO, XCTO defaults) and `CorsFilter.java`; Jetty's
+  `CrossOriginFilter.java` in each `jetty-ee*/…/servlets/`.
+- **Boring-list prior art**, for the inverted "interesting headers" switch:
+  wpscan's `app/models/headers.rb` has a hand-curated 27-entry `known_headers`
+  list feeding `app/finders/interesting_findings/headers.rb` — a working
+  implementation of exactly that design. `lighttpd1.4/src/http_header.h` is a
+  second, larger such list written from the server's side.
+- **`security/testssl.sh`** — `run_security_headers()` (~line 3580) is the
+  baseline to beat, not a source of checks: it enumerates headers and rates
+  *presence* only, and the comment near line 3641 says so outright ("I am not
+  testing for the correctness or anything stupid yet, e.g. `X-Frame-Options:
+  allowall`"). That sentence is this package's reason to exist.
+- **`security/badssl.com`** — `domains/upgrade/{hsts,preloaded-hsts,upgrade}.conf`
+  define live, publicly reachable hosts with known-good HSTS, preload and
+  `upgrade-insecure-requests` values. The only end-to-end fixture source on
+  disk, for whenever a fetcher exists.
+- **HPACK / QPACK static tables** — `nginx/src/http/v2/ngx_http_v2_table.c` and
+  `src/http/v3/ngx_http_v3_table.c`, `lighttpd1.4/src/ls-hpack/lshpack.c`,
+  `libmicrohttpd2/src/mhd2/h2/hpack/`. They enumerate canonical **lowercase**
+  header names, which is the wire-level justification for `message.py`
+  lowercasing rather than a convenience.
+
+### Not relevant — checked, do not re-survey
+
+- **`operating_systems/*`** (linux, freebsd-src, openbsd-src, openwrt, busybox,
+  win2k, nt5src, Windows-Server-2003) — ~19 GB, nothing about HTTP security
+  headers. `busybox/networking/httpd.c` and `Windows-Server-2003/inetsrv/iis`
+  (IIS 6 source) exist but predate every header analysed here; at most they
+  explain where some `Server:` and `X-Powered-By` banners originate.
+- **`web_browsers/lynx2.9.3`** and **`web_browsers/browsh`** — no security
+  header support whatsoever (grepping lynx for HSTS or CSP returns nothing).
+- **`web_browsers/netscape`** — 1998 Communicator source.
+  `network/main/jscookie.c` is the original pre-RFC-6265 cookie implementation,
+  which is archaeology, not a specification.
+- **The remaining servers** — `httpd`, `caddy`, `heliod`, `Zope`, `daphne`,
+  `gunicorn`, `hypercorn`, `twisted`, `uvicorn`, `uwsgi`, `glassfish`,
+  `glassfish-legacy` — they pass configured headers through and originate no
+  security headers or analysis logic. The one exception worth knowing:
+  `hiawatha/src/send.c` emits HSTS itself rather than by configuration.
 
 ## Status
 
