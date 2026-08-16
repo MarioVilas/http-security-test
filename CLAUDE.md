@@ -404,14 +404,18 @@ suppression applies.
 
 For reading and analysis only, do not copy. They live at
 `/home/crapula/ref/<category>/<repo>`, the subdirectory naming the kind of
-material. All third-party, all read-only — no write operations, ever. All are
-git checkouts except `web_browsers/lynx2.9.3`, which is an unpacked tarball, so
-`git log` / `git show` are available for history on the rest.
+material: `documentation`, `security`, `burp`, `cookie_security`,
+`web_browsers`, `web_servers`, `web_app_servers`, `operating_systems`. All
+third-party, all read-only — no write operations, ever. All are git checkouts
+except `web_browsers/lynx2.9.3`, which is an unpacked tarball, so `git log` /
+`git show` are available for history on the rest.
 
-The survey below was done once and is meant to save the next agent from
-redoing it; the paths and the claims about them were verified, not assumed.
-Sizes matter here — `web_browsers/WebKit` is 6.4 GB and
-`operating_systems/nt5src` is 7.1 GB, so scope every `grep` to a subdirectory.
+**This section is a whitelist, not a sample.** What is named below was surveyed
+once and verified rather than assumed, and is the whole of what this project
+cares about; the closing subsection says what to do with everything else. Sizes
+matter — `web_browsers/WebKit` is 6.4 GB, `operating_systems/nt5src` is 7.1 GB
+and `burp/http-request-smuggler` is 154 MB — so scope every `grep` to a
+subdirectory.
 
 ### Primary — reach for these first
 
@@ -551,6 +555,51 @@ the behaviour of the only third-party dependency is readable. One public
 function, `in_hsts_preload(host)`; the list is a packed `hstspreload.bin`
 rebuilt monthly from Chromium's `transport_security_state_static.json`.
 
+**`security/humble`** — rfc-st/humble, the closest peer to this package on disk
+and the one to diff verdicts against. `humble.py` is 5 648 lines, but the part
+worth reading is the data beside it, because it is a catalogue in the same
+sense `catalog.py` is:
+
+- `additional/insecure.txt` — **158 defect names over 93 distinct headers**,
+  each written `Header: Defect` (`Access-Control-Allow-Origin: Unsafe Values`,
+  `Cache-Control: No Valid Directives`). This package has 86 codes over far
+  fewer headers, so that file is a ready-made gap list. Read it for candidates,
+  not as a specification, and rate anything taken from it by principle 3.
+- `additional/missing.txt` — the 14 headers humble reports as absent, against
+  this package's `missing` inventory.
+- `additional/security.txt` — the 62 names it treats as security-relevant at
+  all: its answer to the scoping question the `Layout` section answers here.
+- `additional/fingerprint.txt` — **1 287 vendor/product banner headers**, each
+  annotated with what it identifies (`$WSEP (IBM WebSphere Application
+  Server)`, `Akamai-Cache-Status (Akamai Edge)`). Fifteen times the size of
+  OWASP's 87-name `headers_remove.json`, and the best prior art on disk for the
+  parked *inverted "interesting headers"* switch.
+- `l10n/details.txt` (and its `_es` twin) — its prose catalogue, the analogue of
+  `catalog.py`, for how another tool words the same findings.
+
+MIT-licensed, which changes nothing here: the read-only rule above is about
+scope, not licence.
+
+**`security/shcheck`** and **`security/shcheck-fork`** — this package's own
+provenance, now checkable instead of recalled. `security/shcheck` is santoru's
+upstream at v1.7; `security/shcheck-fork` is `MarioVilas/shcheck`, the fork this
+package grew out of and whose tool was deleted. `git log` in either settles what
+the original did or what the fork changed — including the `default-src 'self'`
+substring bug that principle 4 is named after.
+
+**`documentation/known-http-header-db`** — 271 headers in one JSON
+(`src/db.json` pretty-printed, `dist/db.json` the same content minified),
+aggregated from MDN, the IANA http-fields registry and Wikipedia. Per header:
+`type` (request/response), description, `syntax`, `directives[]` with a
+description each, `specifications[]` with RFC links, and `status` (`permanent`,
+…). The fastest way to answer *"is this a real header, what does it take, which
+RFC"* for a name nobody here has met. **Do not quote its
+`browserCompatibility`** — it is a
+scraped MDN *rendering*, carrying `"Yes"` and `"?"` where versions belong;
+`documentation/browser-compat-data` is the machine-readable original and the
+only one of the two that records flags, partial implementations and
+`version_added: false`.
+
 ### Secondary — for specific parked work
 
 - **`Set-Cookie` analysis.** Jetty's
@@ -561,6 +610,31 @@ rebuilt monthly from Chromium's `transport_security_state_static.json`.
   `SameSiteCookies.java` and `test/…/TestCookieProcessorGeneration.java` are
   the serialization ground truth; `werkzeug/tests/test_http.py` has prefix
   tests in Python. Read these three when the cookie parser lands, not before.
+- **`Set-Cookie` analysis, the analyser side.** `security/securityheaders`
+  (koenbuyens) is the only Python `Set-Cookie` *checker* on disk and is
+  decomposed the way this package is — `checkers/<header>/` beside
+  `models/<header>/`, with `checkers/setcookie/` holding `notsecure.py`,
+  `nothttponly.py` and `requiressecurity.py`, and `models/setcookie/` parsing
+  `SameSite` as a directive. Read it for the decomposition, and read
+  `requiressecurity.py` as a **warning**: it lowercases the cookie name and
+  then tests `startswith('__Secure')` / `startswith('__Host')`, so both prefix
+  branches are unreachable, and it falls back to guessing from `'session' in
+  name` / `'csrf' in name` — the guess the parked cache/cookie item refuses to
+  make. Two failure modes to avoid in one 15-line file; the prefixes are
+  case-**sensitive**, which is what makes the lowercasing wrong rather than
+  merely redundant. `burp/burp-samesite-reporter` is 326 lines of Java that
+  classifies each cookie as `SameSite` missing / `None` / other and carries its
+  reasoning in the issue prose.
+- **`documentation/Open-Cookie-Database`** — 2 264 cookies as CSV and JSON,
+  keyed by name, each with platform, category (Functional / Personalization /
+  Analytics / Marketing / Security), retention period and a `Wildcard match`
+  flag (`_gac_1234` matches wildcard `_ga`). This is the nearest thing on disk
+  to the oracle the parked cache/cookie quirk says does not exist — with two
+  caveats that probably sink it: the categories are *privacy* purposes, not
+  "is this a session token", and it is curated data that ages, which is the
+  objection that kept csp-evaluator's bypass lists out. `burp/CookieMonster`
+  vendors it and implements the wildcard rule, if the semantics are ever
+  needed.
 - **Prior art on defaults.** Tomcat's
   `java/org/apache/catalina/filters/HttpHeaderSecurityFilter.java` (HSTS
   max-age, XFO, XCTO defaults) and `CorsFilter.java`; Jetty's
@@ -568,13 +642,22 @@ rebuilt monthly from Chromium's `transport_security_state_static.json`.
 - **Boring-list prior art**, for the inverted "interesting headers" switch:
   wpscan's `app/models/headers.rb` has a hand-curated 27-entry `known_headers`
   list feeding `app/finders/interesting_findings/headers.rb` — a working
-  implementation of exactly that design. `lighttpd1.4/src/http_header.h` is a
-  second, larger such list written from the server's side.
+  implementation of exactly that design. `burp/HeadersAnalyzer` carries a
+  91-entry `BoringHeaders.txt`, the same design again and the largest hand-
+  curated *boring* list here; humble's 1 287-entry `fingerprint.txt` above is
+  the largest *interesting* one. `lighttpd1.4/src/http_header.h` is a third,
+  written from the server's side.
 - **`security/testssl.sh`** — `run_security_headers()` (~line 3580) is the
   baseline to beat, not a source of checks: it enumerates headers and rates
   *presence* only, and the comment near line 3641 says so outright ("I am not
   testing for the correctness or anything stupid yet, e.g. `X-Frame-Options:
   allowall`"). That sentence is this package's reason to exist.
+  `burp/Headers` and `burp/HeaderGuardian-Burpsuite-Pro-Extension` are the same
+  baseline in miniature and in Python: hand-curated presence lists with an
+  on/off flag per entry (`security_headers.txt` 10 entries, `cookie_flags.txt`
+  7, `dangerous_headers.txt` 2, `potentially_dangerous_headers.txt` 3), plus a
+  user-editable `thresholds.txt` giving the count at which each list flags a
+  host. Both are small enough to read in a sitting and neither judges a value.
 - **`security/badssl.com`** — `domains/upgrade/{hsts,preloaded-hsts,upgrade}.conf`
   define live, publicly reachable hosts with known-good HSTS, preload and
   `upgrade-insecure-requests` values. The only end-to-end fixture source on
@@ -584,24 +667,50 @@ rebuilt monthly from Chromium's `transport_security_state_static.json`.
   `libmicrohttpd2/src/mhd2/h2/hpack/`. They enumerate canonical **lowercase**
   header names, which is the wire-level justification for `message.py`
   lowercasing rather than a convenience.
+- **`security/Security-Headers-Validator`** — one module per header under
+  `headers/`, and the only tool on disk carrying `pragma.py` *and*
+  `cache_control.py`, so it is the one independent opinion available on both
+  parked cache items before writing `pragma-ineffective`.
+- **CSP allowlist-bypass corpora, still not embedded.** `burp/csp-auditor` has
+  `csp-auditor-core/src/main/resources/resources/data/csp_host_user_content.txt`
+  and `csp_host_vulnerable_js.txt` — a second curated list beside
+  csp-evaluator's and split along the same two axes, loaded by
+  `model/WeakCdnHost.java`. `burp/CSP-Bypass` has a readable standalone
+  `csp_parser.py` but a `csp_known_bypasses.py` holding exactly one domain, so
+  it is no substitute for either. The **Not embedded** ruling covers all of
+  them; nothing here changes the upkeep argument.
+- **`burp/Additional_CORS_Checks`** — Kotlin, and the prior art for the parked
+  active origin-reflection check: it re-issues a request with a forged `Origin`
+  and reports arbitrary-origin and `null`-origin reflection (`doc/*.png` shows
+  what it claims). Tool-side work, exactly as that item says.
 
-### Not relevant — checked, do not re-survey
+### Everything else — assume it is not interesting
 
-- **`operating_systems/*`** (linux, freebsd-src, openbsd-src, openwrt, busybox,
-  win2k, nt5src, Windows-Server-2003) — ~19 GB, nothing about HTTP security
-  headers. `busybox/networking/httpd.c` and `Windows-Server-2003/inetsrv/iis`
-  (IIS 6 source) exist but predate every header analysed here; at most they
-  explain where some `Server:` and `X-Powered-By` banners originate.
-- **`web_browsers/lynx2.9.3`** and **`web_browsers/browsh`** — no security
-  header support whatsoever (grepping lynx for HSTS or CSP returns nothing).
-- **`web_browsers/netscape`** — 1998 Communicator source.
-  `network/main/jscookie.c` is the original pre-RFC-6265 cookie implementation,
-  which is archaeology, not a specification.
+`/home/crapula/ref` holds far more than the whitelist above: ~19 GB of
+operating-system source, a dozen application servers, seven cookie tools and
+two dozen Burp extensions of which only the eight named above touch a header
+value or a cookie flag. **Nothing outside this section is relevant unless the
+human says so.** Do not survey it, do not grep it speculatively, and do not
+re-derive that it is uninteresting — that was done once, and the cost of doing
+it again is the reason this paragraph exists.
+
+Only the negatives that would otherwise look promising are kept:
+
+- **There is no Chromium checkout.** Firefox and WebKit are the only engines
+  readable here, so a Chromium claim still needs BCD or an external source.
+- **`operating_systems/*`** — nothing about HTTP security headers.
+  `busybox/networking/httpd.c` and `Windows-Server-2003/inetsrv/iis` (IIS 6)
+  predate every header analysed here; at most they explain where a few
+  `Server:` and `X-Powered-By` banners originate.
 - **The remaining servers** — `httpd`, `caddy`, `heliod`, `Zope`, `daphne`,
-  `gunicorn`, `hypercorn`, `twisted`, `uvicorn`, `uwsgi`, `glassfish`,
-  `glassfish-legacy` — they pass configured headers through and originate no
-  security headers or analysis logic. The one exception worth knowing:
+  `gunicorn`, `hypercorn`, `twisted`, `uvicorn`, `uwsgi`, `glassfish*` — pass
+  configured headers through and originate no analysis logic. One exception:
   `hiawatha/src/send.c` emits HSTS itself rather than by configuration.
+- **The remaining `burp/` and `cookie_security/` repos** — JWT tooling, WAF
+  fingerprinting and cookie *decryption*, HAR/Nessus/sitemap import, request
+  smuggling, nuclei and semgrep bridges, and GDPR consent scanners. Burp
+  plumbing and privacy-compliance tools; none analyses a header value or a
+  cookie flag.
 
 ## Status
 
