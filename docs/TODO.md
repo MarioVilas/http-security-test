@@ -24,5 +24,3 @@ In no particular order:
 - https://en.wikipedia.org/wiki/List_of_HTTP_header_fields
 - https://www.cloaked.pl/2021/02/the-gallery-of-http-headers/
 - https://http.dev/headers
-- https://www.iana.org/assignments/message-headers/message-headers.xml
-- https://nathandavison.com/blog/abusing-http-hop-by-hop-request-headers
