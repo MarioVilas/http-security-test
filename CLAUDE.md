@@ -355,21 +355,10 @@ suppression applies.
 
 ## Reference material on disk
 
-Read for ideas and reference, never copy.
-
-- `./tmp/caniuse` — browser support, authoritative for "is this value worth accepting"
-- `./tmp/csp-evaluator` — CSP evaluator from Google written in Node.js
-- `./tmp/hstspreload` — Python library that maps Chromium's preload list
-- `./tmp/header-issue-reporter` — Burp plugin, read for ideas only
-- `./tmp/headers-analyzer` — Burp plugin, read for ideas only
-- `./tmp/shcheck` — Tool that inspired the development of this one
-- `./tmp/shcheck-fork` — Fork of the previous tool with some minor improvements
-- `./tmp/www-project-secure-headers/` — OWASP Secure Headers documentation.
-  `mainsite/01_headers.md` is the per-header reference; `ci/headers_add.json` and
-  `ci/headers_remove.json` are machine-readable and CI-regenerated from the tables
-  in `mainsite/03_best_practices.md`, so read those two rather than the prose.
-  Several sections carry *browser tests they ran themselves* — worth more than the
-  recommendations around them
+For reading and analysis only, do not copy. They can be found at ´/home/crapula/ref´
+under various subdirectories, each subdirectory categorizes the kind of material.
+All are git repositories, so git commands may be used to inspect the history if needed.
+They are all third party repositories, so no write operations.
 
 ## Status
 
