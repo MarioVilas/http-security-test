@@ -277,6 +277,25 @@ suppression applies.
 - **Not analyzed:** `Document-Policy` (no closed value set, no delegation axis, no
   concrete configuration points of its own); `X-Content-Security-Policy` /
   `X-WebKit-CSP` contents (no browser reads them, so content decides nothing).
+- **Not analyzed: CSP Embedded Enforcement**, i.e. `Allow-CSP-From` (response)
+  and `Sec-Required-CSP` (request). Decided 2026-08-17 with the spec source in
+  front of us at `w3c/webappsec-cspee` and the implementation confirmed —
+  Chromium's `ParseAllowCSPFromHeader()`
+  (`services/network/public/cpp/content_security_policy/`
+  `content_security_policy.cc:1404`) takes `*` or a single origin and rejects
+  anything else, and `content/browser/renderer_host/cspee_histogram_browsertest`
+  `.cc` exists, so this is live in Chrome. It is nonetheless out of scope, for
+  reasons that are about the *value set*, not obscurity:
+  - **`Allow-CSP-From: *` is not a defect.** CSPEE only lets an embedder
+    *tighten* — the embedded document must return a policy that subsumes the
+    required one or the frame is blocked — so a wildcard grants an embedder no
+    power to weaken anything. Rating it would be principle 4 all over again.
+  - That leaves exactly one judgeable case, a value that is neither `*` nor a
+    valid origin. One narrow `error` code, on a header **absent from both MDN
+    BCD and OWASP's 17 tracked names**, so its prevalence cannot be measured
+    from the corpus at all. Not worth a code today.
+  - Reopen it if BCD gains an entry, or if a second engine ships it — the spec
+    checkout is on disk, so the recheck is cheap. Do not re-survey the repo.
 - **Not embedded:** csp-evaluator's 171-entry JSONP/Angular bypass lists — high
   catch rate, but curated data that ages, and the module has no upkeep burden
   today. The data-free checks from it *were* ported.
@@ -437,10 +456,37 @@ suppression applies.
     `data` is a case-sensitive identifier even though the prefix test is not.
 
   Neither draft is in `rfc-library`'s tracked tree; if they are on disk they are
-  under its `mirror/`, which the human maintains — do not fetch them, and if
-  they are absent, work from the browser sources and say the draft was not
-  available. And WebKit is no help here — its only prefix code is the curl
-  backend.
+  under its `mirror/`, which the human maintains — do not fetch them. And WebKit
+  is no help here — its only prefix code is the curl backend.
+
+  **Both drafts are readable on disk after all, in `w3c/webref`** (found
+  2026-08-17; this paragraph used to end "work from the browser sources and say
+  the draft was not available"). Reffy crawls them, so
+  `ed/algorithms/rfc6265bis.json` and `ed/algorithms/layered-cookies.json` carry
+  the numbered steps verbatim, with `ed/headings/` and `ed/ids/` beside them.
+  What that settled, and what it did not:
+  - The section numbers above are **confirmed independently**: 6265bis §4.1.3
+    has exactly the two subsections, layered-cookies has §4.1.3.3 `__Http-` and
+    §4.1.3.4 `__Host-Http-`, and 6265bis §5.4 is titled "Cookie Name Prefixes".
+  - layered-cookies' *Store a Cookie* has all four prefixes at steps 13–16 and
+    the hidden-prefix-in-value rule at step 17, every one of them matching on
+    the name "byte-lowercased", with an inline note giving the same reason
+    Firefox's comment does — "to protect servers that process these values in a
+    case-insensitive manner".
+  - **The spec's structure is four independent guard clauses, not the browsers'
+    longest-prefix-first table.** `__Host-Http-sid` trips step 14 (starts with
+    `__host-`) *and* step 16, so the conjunction falls out of both firing. The
+    longest-prefix-first warning above is about implementations that match once
+    against a prefix table, and it still stands — it is just not what the draft
+    says.
+  - **Not everything is extractable.** These are plain RFC HTML with no Bikeshed
+    markup, so there are no `dfns/` files for either: "Host-prefix compatible"
+    and "Http-prefix compatible" are defined in §4.1.3 prose that webref does
+    not carry, and only their anchors show up in `ids/`. Read them from
+    `netwerk/cookie/CookiePrefixes.cpp`, which is the plan anyway.
+  - **Revision drift.** Reffy crawls the editor's copy at `httpwg.org/`
+    `http-extensions/`, not a numbered revision, so the extract can be ahead of
+    the -22 / -02 cited above. It is the current text, not a pinned one.
 - **The cache/cookie cross-header quirk — land it *with* the cookie parser, not
   before.** RFC 9111 §7.3: "the Set-Cookie response header field does not inhibit
   caching; a cacheable response with a Set-Cookie header field can be (and often
@@ -490,7 +536,7 @@ suppression applies.
 
 For reading and analysis only, do not copy. They live at
 `/home/crapula/ref/<category>/<repo>`, the subdirectory naming the kind of
-material: `documentation`, `security`, `burp`, `cookie_security`,
+material: `documentation`, `security`, `burp`, `cookie_security`, `w3c`,
 `web_browsers`, `web_servers`, `web_app_servers`, `operating_systems`. All
 git checkouts except `web_browsers/lynx2.9.3`, which is an unpacked tarball, so
 `git log` / `git show` are available for history on the rest.
@@ -510,7 +556,8 @@ cares about; the closing subsection says what to do with everything else. Sizes
 matter, and they grow with every fetch, so re-measure rather than trust these:
 `web_browsers/chromium` is **70 GB** (64 GB of it `.git`, so `git log` is cheap
 and a tree-wide `grep` is not), `web_browsers/WebKit` is 19 GB,
-`web_browsers/firefox` is 11 GB, `operating_systems/nt5src` is 9.1 GB
+`web_browsers/firefox` is 11 GB, `operating_systems/nt5src` is 9.1 GB,
+`w3c/webref` is 1.4 GB (1.1 GB of it `.git`; the data is `ed/`, 186 MB)
 and `burp/http-request-smuggler` is 154 MB — so scope every `grep` to a
 subdirectory.
 
@@ -768,6 +815,80 @@ scraped MDN *rendering*, carrying `"Yes"` and `"?"` where versions belong;
 `documentation/browser-compat-data` is the machine-readable original and the
 only one of the two that records flags, partial implementations and
 `version_added: false`.
+
+**`w3c/webref`** — mechanically extracted content of **752 crawled web specs**,
+and the answer to the spec gap this section otherwise records as unclosable:
+the WHATWG and W3C living standards are in no IETF mirror, and this is them, in
+JSON. Generated by Reffy, regenerated upstream every 6 hours. Surveyed
+2026-08-17.
+
+- **`ed/dfns/` is a registry of headers defined by living standards.** Filtering
+  on `type == "http-header"` yields **77 headers across 19 specs**, each with
+  its `linkingText`, its exact anchor `href`, and the `heading` it sits under —
+  CSP and CSP-Report-Only from `CSP3`, COOP/COEP and their report-only twins,
+  XFO and `Origin-Agent-Cluster` from `html`, the eight `Access-Control-*`,
+  `X-Content-Type-Options` and CORP from `fetch`, `Clear-Site-Data`,
+  `Permissions-Policy`, the four `Sec-Fetch-*`, and the Document-Policy family.
+  **The type filter is not complete and must not be used alone**: authors who
+  wrote a plain `<dfn>` get `type: "dfn"`, which is how `Referrer-Policy`
+  (`dfns/referrer-policy.json`) and every `Integrity-Policy` term
+  (`dfns/sri-2.json`) escape it. Grep `linkingText` as well.
+- **`ed/algorithms/` is the normative text**, 58 MB of it: each algorithm as a
+  name, an `href`, and a nested `steps[]` tree whose `html` carries the actual
+  numbered prose with every cross-reference resolved to an absolute URL. This is
+  the closest thing on disk to reading the spec, and it is greppable.
+- Worked example, and it moved a ruling: `algorithms/sri-2.json` holds
+  *processing an integrity policy*, which confirms `blocked-destinations` is the
+  closed set `{script, style}` at spec level — matching Chromium's parser — and
+  adds a fact the browser source does not state as plainly, that **an absent
+  `sources` key means `inline`** ("If `dictionary["sources"]` does not exist *or*
+  if its value contains `inline`, append `inline`"). A policy with an explicitly
+  empty `sources` therefore blocks nothing.
+- **RFCs are crawled too but yield less.** `rfc6797` (HSTS) and `rfc7034` (XFO)
+  get `headings/` and `ids/` only — plain RFC HTML has no Bikeshed markup, so
+  there are no dfns and no algorithms. For those, `rfc-library` remains the
+  source.
+- This checkout is the `main` branch — **raw** extracts, explicitly carrying no
+  validity guarantee. The `curated` branch is the patched one; the difference
+  bites on IDL and CSS, which this project does not read. Extraction artefacts
+  do exist in what it does read: `html`'s XFO dfn is filed under a
+  `speculative-loading.html` href because heading attribution drifts across
+  HTML's multipage split. Trust the `linkingText`, sanity-check the `href`.
+
+**`w3c/browser-specs`** — the 804-entry curated spec list that decides what
+`webref` crawls, and independently useful as a **spec liveness oracle**:
+`standing` is `good` (735) / `discontinued` (61) / `pending` (8), with
+`obsoletedBy`, `formerNames`, `organization` and both nightly and release URLs
+per entry. Facts read off it 2026-08-17, each of which bears on a ruling here:
+`document-policy` is in **good** standing, so "not analyzed" is a scope call and
+not a dead-spec call; **`feature-policy` is absent entirely** — not
+discontinued, not present, the list simply does not carry it, which is a
+stronger statement about it than `DEPRECATED_HEADERS` makes; there is no
+`integrity-policy` entry because Integrity-Policy is defined inside `sri-2`;
+`partitioned-cookies` is **discontinued**; and `rfc7230`–`rfc7235` are marked
+obsoleted by `rfc9110`/`rfc9111`/`rfc9112`, which is a cheap way to check an RFC
+citation has not gone stale.
+
+**`w3c/web-features`** — the WebDX Baseline catalogue, 1 189 features as
+`features/<id>.yml` (hand-written: `name`, `description`, `spec`, `caniuse`,
+`compat_features` as BCD keys) beside `features/<id>.yml.dist` (generated:
+`baseline: high|low|false`, `baseline_low_date`, `baseline_high_date`, and the
+minimum version per browser). It is **a rollup of BCD, not a rival to it** —
+use it for the one-line "is this widely available" answer (`hsts` is
+`baseline: high` since 2018-01-29, `csp` since 2019-02-02) and go to BCD the
+moment the question is per-directive or per-value.
+
+- Its real asset here is the **`discouraged:`** key: `reason`, `alternatives`,
+  an optional `removal_date`, and `according_to` — a **URL to the decision
+  itself**. That is the citation `DEPRECATED_HEADERS` entries otherwise have to
+  be argued from prose. Of the 50 discouraged features exactly one is a header:
+  `feature-policy`, "superseded by permissions policy", cited to
+  `w3c/webappsec-permissions-policy` PR #379.
+- **Coverage is partial and the gaps are ours.** It references 115 headers, but
+  there is no feature for `X-Frame-Options`, `X-Content-Type-Options`, COOP,
+  `X-XSS-Protection`, `Expect-CT` or `Public-Key-Pins` — it curates what web
+  developers are told to *use*, so obsolete and defensive-only headers fall
+  outside it. Do not read an absence here as an absence of support.
 
 ### Secondary — for specific parked work
 
