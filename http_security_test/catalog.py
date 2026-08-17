@@ -201,6 +201,10 @@ MESSAGES = {
         "does not allow, so browsers reject it and no cross-origin read "
         "succeeds"
     ),
+    "acao-invalid-origin": (
+        "present but {value} is not a serialized origin, which browsers compare "
+        "byte for byte, so it matches nothing and no cross-origin read succeeds"
+    ),
     "acao-wildcard": (
         "present and set to *, so any origin may read the response; that is "
         "deliberate for public assets and a leak for anything user-specific"
@@ -302,8 +306,52 @@ MESSAGES = {
         "unaffected"
     ),
     "ip-endpoints-undefined": (
-        "present and reports to {endpoints}, which no Reporting-Endpoints "
-        "header defines, so violations are caught and never delivered"
+        "present and reports to {endpoints}, which no Reporting-Endpoints or "
+        "Report-To header defines, so violations are caught and never delivered"
+    ),
+    "csp-report-to-undefined": (
+        "present and reports violations to {groups}, which no Reporting-Endpoints "
+        "or Report-To header defines, so the policy enforces and every violation "
+        "it catches is discarded"
+    ),
+    "coop-report-to-undefined": (
+        "present and reports to {groups}, which no Reporting-Endpoints or "
+        "Report-To header defines, so the policy applies and every report it "
+        "would have sent is discarded"
+    ),
+    "coep-report-to-undefined": (
+        "present and reports to {groups}, which no Reporting-Endpoints or "
+        "Report-To header defines, so the policy applies and every report it "
+        "would have sent is discarded"
+    ),
+    "re-endpoint-undeliverable": (
+        "present but the endpoint behind {endpoints} is not a URL browsers "
+        "deliver reports to -- it must be HTTPS, or a loopback address -- so "
+        "anything reporting to that group is discarded"
+    ),
+    "re-ineffective": (
+        "present on a response that did not arrive over HTTPS, where browsers "
+        "ignore the header entirely, so every group it defines is undefined and "
+        "no report of any kind is delivered"
+    ),
+    "re-invalid": (
+        "present but is not a structured field dictionary; browsers parse the "
+        "header whole or not at all, so every group it meant to define is "
+        "undefined. Keys are lower-case: a-z, digits and _ - . * only"
+    ),
+    "rt-endpoint-undeliverable": (
+        "present but the endpoint behind {endpoints} is not a URL browsers "
+        "deliver reports to -- it must be HTTPS, or a loopback address -- so "
+        "anything reporting to that group is discarded"
+    ),
+    "rt-ineffective": (
+        "present on a response that did not arrive over HTTPS, where browsers "
+        "ignore the header entirely, so every group it defines is undefined and "
+        "no report of any kind is delivered"
+    ),
+    "rt-invalid": (
+        "present but its value is not the JSON the header is defined as "
+        "carrying, so browsers read no endpoint group out of it at all"
     ),
     # -- the obsolete headers -----------------------------------------------
     "ect-deprecated": "present but deprecated since June 2021",

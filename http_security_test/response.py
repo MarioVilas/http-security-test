@@ -24,18 +24,22 @@ ones present mean together, and which findings a sibling header has already made
 moot. The headers that belong to no family are judged here too.
 """
 
+import json
 import re
 
 from .csp import _analyze_csp, _analyze_csp_all, parse_csp
 from .findings import Finding, identity
 from .hsts import _analyze_hsts, _analyze_preload
 from .isolation import (
+    COOP_VALUES,
     _analyze_acao,
     _analyze_coep,
     _analyze_coop,
     _analyze_corp,
     _analyze_cors,
     _analyze_isolation,
+    _bare_item,
+    _item_parameter,
     _seeks_isolation,
     _shares_credentials_with_everyone,
 )
@@ -90,6 +94,16 @@ SECURITY_HEADERS = (
     "X-Content-Type-Options",
     "X-Frame-Options",
 )
+
+
+# Security-relevant headers that are inventoried when present but never
+# reported missing, because their absence is the ordinary state of the web
+# rather than a gap. This is deliberately not part of SECURITY_HEADERS: that
+# tuple is read three times -- for the `security` inventory, for the `missing`
+# one, and by _report_missing -- and only the first of the three is wanted here.
+# A response that configures no reporting is not thereby defective, so an
+# `re-missing` finding would fire on very nearly every site analysed.
+REPORTING_HEADERS = ("Report-To", "Reporting-Endpoints")
 
 
 # Headers a response may legally repeat, because repetition is defined for them
@@ -632,15 +646,258 @@ def _analyze_report_only(present):
     return findings
 
 
-def _reporting_endpoint_names(present):
-    """The group names a Reporting-Endpoints header defines."""
-    names = set()
+# Schemes a browser will deliver a report to. Both engines test the scheme
+# rather than the URL as a whole: Chromium requires SchemeIsCryptographic()
+# outright, Firefox accepts any potentially trustworthy origin, which is a
+# superset -- see _defines_group for what that difference costs.
+REPORTING_SCHEMES = frozenset(["https", "wss"])
+
+
+def _is_loopback(host):
+    """Whether a host is one Firefox counts as trustworthy over plaintext.
+
+    Firefox delivers reports here and Chromium does not, so an endpoint on one
+    of these is the single case this package cannot call either way. The
+    definition follows the potentially-trustworthy rule: localhost and anything
+    under it, the IPv6 loopback, and the whole of 127.0.0.0/8 rather than just
+    127.0.0.1.
+    """
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    if host == "[::1]":
+        return True
+    octets = host.split(".")
+    return len(octets) == 4 and octets[0] == "127" and all(o.isdigit() for o in octets)
+
+
+def _split_dictionary(value):
+    """A structured field dictionary's members, split on the commas that separate
+    them rather than the ones inside a quoted URL.
+
+    `csp="https://example.com/r?a=1,b=2"` is one member, and splitting it naively
+    invents a second group named `b`. A phantom group can only ever make a name
+    look defined that is not, so the error runs towards saying nothing -- which
+    is the wrong direction for a helper four findings consult.
+    """
+    members = []
+    current = []
+    quoted = False
+    for character in value:
+        if character == '"':
+            quoted = not quoted
+        if character == "," and not quoted:
+            members.append("".join(current))
+            current = []
+            continue
+        current.append(character)
+    members.append("".join(current))
+    return members
+
+
+def _delivers(url):
+    """Whether a browser would deliver reports to this endpoint URL.
+
+    Both engines drop an endpoint they cannot deliver to *before* registering
+    its name -- Firefox `ReportingHeader.cpp` returns early on
+    IsPotentiallyTrustworthyOrigin, Chromium's ProcessEndpointURLString on
+    SchemeIsCryptographic -- so a dropped endpoint leaves its group undefined
+    rather than merely unreachable. That is why this belongs here and not in a
+    finding of its own.
+
+    Two shapes are left alone because the engines disagree about them, and a
+    disagreement cannot be a defect: a loopback endpoint over plaintext, which
+    Firefox delivers to and Chromium discards, and a relative URL, which both
+    resolve but against different rules about what counts as relative.
+    """
+    url = url.strip().strip('"').strip()
+    scheme, separator, rest = url.partition("://")
+    if not separator:
+        # Relative, or not a URL at all. Firefox resolves anything relative
+        # against the document; Chromium only a leading-slash path. Saying
+        # nothing is the only answer true of both.
+        return True
+    if scheme.lower() in REPORTING_SCHEMES:
+        return True
+    authority = rest.partition("/")[0].strip().lower()
+    # A bracketed IPv6 literal carries colons of its own, so the port comes off
+    # after the closing bracket rather than at the first colon.
+    if authority.startswith("["):
+        host = authority.partition("]")[0] + "]"
+    else:
+        host = authority.partition(":")[0]
+    return _is_loopback(host)
+
+
+def _report_to_pairs(present):
+    """(group name, endpoint URL) for every endpoint a Report-To header declares,
+    or None if the header is present and is not readable JSON.
+
+    Chromium runs these through the same ProcessEndpointURLString that serves
+    Reporting-Endpoints, so the URL rule is shared; it processes each group
+    separately, so one unusable group does not void the rest.
+    """
+    values = _lookup_all(present, "Report-To")
+    if not values:
+        return []
+    pairs = []
+    for value in values:
+        try:
+            groups = json.loads("[%s]" % value)
+        except ValueError:
+            return None
+        if not isinstance(groups, list):
+            return None
+        for group in groups:
+            if not isinstance(group, dict):
+                return None
+            name = group.get("group", "default")
+            if not isinstance(name, str):
+                return None
+            endpoints = group.get("endpoints")
+            urls = endpoints if isinstance(endpoints, list) else []
+            found = False
+            for endpoint in urls:
+                if isinstance(endpoint, dict) and isinstance(endpoint.get("url"), str):
+                    pairs.append((name, endpoint["url"]))
+                    found = True
+            if not found:
+                # The group is still declared, and naming it is not a defect.
+                pairs.append((name, None))
+    return pairs
+
+
+def _report_to_names(present):
+    """The group names a Report-To header defines, or None if it cannot be read.
+
+    Report-To is the Reporting API's first spelling and is deprecated in favour
+    of Reporting-Endpoints, but deprecated is not ignored: both engines still
+    parse and honour it -- Chromium wires it up at reporting_service.cc:250 and
+    Firefox at ReportingHeader.cpp:211 -- so a response that defines its groups
+    only this way is configured correctly and must not be told otherwise.
+
+    The value is one or more JSON objects separated by commas, which is not
+    itself valid JSON; wrapping them in brackets is what makes it parseable. A
+    group key is optional and its absence names the group `default`.
+
+    Returns None rather than an empty set when the header is present but
+    unreadable. The caller treats that as "cannot tell", because a header this
+    package failed to parse may still define the group, and claiming a defect
+    on the strength of our own parser giving up is exactly the false positive
+    this project exists to avoid.
+    """
+    pairs = _report_to_pairs(present)
+    if pairs is None:
+        return None
+    return {name for name, _url in pairs}
+
+
+# A structured field dictionary key, RFC 9651: `key = ( lcalpha / "*" )
+# *( lcalpha / DIGIT / "_" / "-" / "." / "*" )`, where lcalpha is a-z only. An
+# uppercase letter is the easy way to get this wrong, and it is not a
+# forgiving mistake: both engines drop the entire header when the dictionary
+# will not parse, rather than the one member that broke it.
+_SFV_KEY = re.compile(r"[a-z*][a-z0-9_.*-]*\Z")
+
+
+def _reporting_endpoints(present):
+    """(group name, endpoint URL) for a Reporting-Endpoints header, or None if
+    the header will not parse as a structured field dictionary."""
+    pairs = []
     for value in _lookup_all(present, "Reporting-Endpoints"):
-        for chunk in value.split(","):
-            name, sep, _url = chunk.partition("=")
-            if sep:
-                names.add(name.strip())
-    return names
+        for member in _split_dictionary(value):
+            name, separator, url = member.partition("=")
+            if not separator:
+                continue
+            name = name.strip()
+            if not _SFV_KEY.match(name):
+                return None
+            pairs.append((name, url))
+    return pairs
+
+
+def _reporting_endpoints_apply(secure, host):
+    """Whether a browser reads a Reporting-Endpoints header on this response.
+
+    Reporting API step 1: "Abort these steps if response's HTTPS state is not
+    'modern', and the origin of response's url is not potentially trustworthy."
+    Note the conjunction -- a plaintext response from a loopback origin is
+    still potentially trustworthy, so the header applies there.
+    """
+    return secure or (host is not None and _is_loopback(host.strip().lower()))
+
+
+# The two headers that define reporting groups, each with the codes for the
+# three things that can be wrong with a definition. Report-To is deprecated in
+# favour of Reporting-Endpoints and both engines still honour it, so it is
+# analysed rather than waved through -- but its absence is not a gap, which is
+# why neither of these is in SECURITY_HEADERS.
+REPORTING_DEFINERS = (
+    ("Reporting-Endpoints", _reporting_endpoints, "re-invalid", "re-ineffective",
+     "re-endpoint-undeliverable"),
+    ("Report-To", _report_to_pairs, "rt-invalid", "rt-ineffective",
+     "rt-endpoint-undeliverable"),
+)
+
+
+def _analyze_reporting_endpoints(present, secure=True, host=None):
+    """Defects in the definition of a reporting endpoint.
+
+    These belong to the header that defined the endpoint rather than to every
+    policy that named the group: one endpoint URL nothing can be delivered to
+    is one fact, however many policies point at it, and blaming each of them
+    would report the same defect up to four times with one fix between them.
+
+    Three things are judged, and all three are answerable from the response
+    alone: whether the header parses at all, whether a browser reads it on this
+    response, and whether each URL is one reports can be delivered to. Whether
+    anything is listening at the other end is an active question and is not
+    asked here.
+
+    None is a security defect -- a report that is never collected costs
+    information, not protection, and there is no way for an attacker to reach
+    the site or its users through one -- so all of them are notes.
+    """
+    findings = []
+    for name, parse, invalid, ineffective, undeliverable_code in REPORTING_DEFINERS:
+        pairs = parse(present)
+        if pairs is None:
+            findings.append(Finding(name, invalid))
+            continue
+        if not pairs:
+            continue
+        if not _reporting_endpoints_apply(secure, host):
+            findings.append(Finding(name, ineffective))
+            continue
+        undeliverable = sorted(
+            {group for group, url in pairs if url is not None and not _delivers(url)}
+        )
+        if undeliverable:
+            findings.append(
+                Finding(name, undeliverable_code, {"endpoints": undeliverable})
+            )
+    return findings
+
+
+def _reporting_endpoint_names(present):
+    """The group names this response defines, or None if it cannot tell.
+
+    Syntactic on purpose. Whether a browser will deliver to the URL behind a
+    name is a defect in the *definition*, which _analyze_reporting_endpoints
+    reports against the header that wrote it; a policy that names a group
+    someone did define has done nothing wrong and is not told otherwise.
+
+    Both spellings of the Reporting API count. None means a Report-To header is
+    present and could not be read, and no caller may report an undefined group
+    on that basis.
+    """
+    endpoints = _reporting_endpoints(present)
+    legacy = _report_to_names(present)
+    if endpoints is None or legacy is None:
+        # A header that will not parse defines nothing, but the defect is its
+        # own -- see _analyze_reporting_endpoints -- and no policy that named
+        # one of its groups is told it named something imaginary.
+        return None
+    return {name for name, _url in endpoints} | legacy
 
 
 def _analyze_ip_reporting(present):
@@ -660,17 +917,99 @@ def _analyze_ip_reporting(present):
     policy = parse_integrity_policy(value)
     if not policy:
         return []
+    # A policy that blocks nothing catches no violation, so it has none to
+    # deliver and where it would have sent them decides nothing -- the same
+    # answer _analyze_ip gives before reading any other directive. Style-only
+    # counts as blocking nothing while no engine honours that destination.
+    destinations = policy.get("blocked-destinations", [])
+    if not any(name in IP_BLOCKING_DESTINATIONS for name in destinations):
+        return []
     wanted = policy.get("endpoints", [])
     if not wanted:
         return []
-    undefined = [
-        name for name in wanted if name not in _reporting_endpoint_names(present)
-    ]
+    defined = _reporting_endpoint_names(present)
+    if defined is None:
+        return []
+    undefined = [name for name in wanted if name not in defined]
     if not undefined:
         return []
     return [
         Finding("Integrity-Policy", "ip-endpoints-undefined", {"endpoints": undefined})
     ]
+
+
+# The headers that name a reporting group the way Integrity-Policy names one,
+# and the code each raises when nothing defines it. CSP spells it as a
+# directive; COOP and COEP as a parameter of a structured field item.
+REPORT_TO_HEADERS = (
+    ("Content-Security-Policy", "csp-report-to-undefined"),
+    ("Cross-Origin-Opener-Policy", "coop-report-to-undefined"),
+    ("Cross-Origin-Embedder-Policy", "coep-report-to-undefined"),
+)
+
+
+def _csp_report_to_groups(present):
+    """Every reporting group the response's CSPs name.
+
+    A browser enforces every policy a response carries and each carries its own
+    report-to, so a group undefined for one policy is that policy's violations
+    going nowhere whatever a sibling says. That makes this "any policy", the
+    same way a syntax defect belongs to the text of one policy -- unlike a
+    weakness, which has to be in all of them to survive the intersection.
+    """
+    groups = []
+    for value in _lookup_all(present, "Content-Security-Policy"):
+        groups.extend(parse_csp(value).get("report-to", []))
+    return groups
+
+
+def _applies(name, value):
+    """Whether a policy is one a browser will act on at all.
+
+    A header that opted into nothing blocks nothing, so it has nothing to
+    report, so where its reports would have gone decides nothing -- and saying
+    otherwise renders a sentence that is plainly false ("the policy applies and
+    every report it would have sent is discarded", of a policy that applies
+    nothing). An unrecognised value belongs here too, because both engines fall
+    back to the inert default rather than to the value the operator meant.
+    """
+    bare = _bare_item(value)
+    if name == "Cross-Origin-Opener-Policy":
+        return bare in COOP_VALUES
+    if name == "Cross-Origin-Embedder-Policy":
+        return bare in ("require-corp", "credentialless")
+    return True
+
+
+def _analyze_report_to_groups(present):
+    """Reporting groups CSP, COOP and COEP name that nothing defines.
+
+    The same defect _analyze_ip_reporting reports for Integrity-Policy, and the
+    same consequence: the header still does its job -- the policy enforces, the
+    document is isolated -- and every violation it notices is discarded. A
+    reporting endpoint that never receives anything is indistinguishable from
+    one that has nothing to report, which is the failure mode worth naming.
+
+    Only the enforcing spellings are read, following the same principle
+    _analyze_ip_reporting does.
+    """
+    defined = _reporting_endpoint_names(present)
+    if defined is None:
+        return []
+    findings = []
+    for name, code in REPORT_TO_HEADERS:
+        if name == "Content-Security-Policy":
+            wanted = _csp_report_to_groups(present)
+        else:
+            value = _sole_value(present, name)
+            if value is None or not _applies(name, value):
+                continue
+            group = _item_parameter(value, "report-to")
+            wanted = [group] if group else []
+        undefined = sorted({group for group in wanted if group not in defined})
+        if undefined:
+            findings.append(Finding(name, code, {"groups": undefined}))
+    return findings
 
 
 def _suppress_redundant(findings, present):
@@ -733,6 +1072,8 @@ def analyze_all(present, secure=True, host=None):
     findings.extend(_analyze_policy_overlap(present))
     findings.extend(_analyze_cors(present))
     findings.extend(_analyze_ip_reporting(present))
+    findings.extend(_analyze_report_to_groups(present))
+    findings.extend(_analyze_reporting_endpoints(present, secure, host))
     findings.extend(_analyze_report_only(present))
     findings.extend(_analyze_duplicates(present))
     findings.extend(_analyze_preload(present, host))
@@ -748,7 +1089,10 @@ def inventory(present):
     """What the response carries, before anything is judged about it.
 
     Four tables, and the split between them is the point: `security` and
-    `missing` are two halves of one question, `deprecated` names headers whose
+    `missing` are two halves of one question -- with the one exception of
+    REPORTING_HEADERS, which is inventoried when present and never reported
+    absent, because configuring no reporting is not a defect -- `deprecated`
+    names headers whose
     values are analysed elsewhere, and `information` and `caching` name headers
     whose values are never analysed at all -- only a human can say whether a
     particular `Server` banner is a leak.
@@ -760,7 +1104,7 @@ def inventory(present):
     """
     present = _normalize(present)
     return {
-        "security": _filter_headers(present, SECURITY_HEADERS),
+        "security": _filter_headers(present, SECURITY_HEADERS + REPORTING_HEADERS),
         "missing": [name for name in SECURITY_HEADERS if name.lower() not in present],
         "deprecated": _filter_headers(present, DEPRECATED_HEADERS),
         "information": _filter_headers(present, INFORMATION_HEADERS),

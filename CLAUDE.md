@@ -58,6 +58,12 @@ carries headers the same way, so a future `request.py` shares it.
 no family. That is the resting point, not a half-measure — a module each would
 be overkill.
 
+`Reporting-Endpoints` and `Report-To` live there for the opposite reason: they
+*are* a family, and every other member of it is a header analysed elsewhere.
+Five headers name a reporting group — CSP, COOP, COEP, Integrity-Policy and
+Document-Isolation-Policy when it lands — while only these two define one, so
+every question about reporting is a cross-header question by construction.
+
 ## Design principles
 
 These were expensive to arrive at. Do not quietly reverse them.
@@ -191,6 +197,16 @@ Decisions inside that shape, each of which had an alternative:
   key. `message` can be dropped entirely with `message=False`.
 - **`inventory()` takes no `secure`.** Principle 2: nothing is withheld from an
   inventory. HSTS is missing on a plaintext response and the inventory says so.
+- **`security` and `missing` are two halves of one question, with one
+  exception.** `REPORTING_HEADERS` (`Report-To`, `Reporting-Endpoints`) is
+  inventoried under `security` when present and is **never** reported absent,
+  because a response that configures no reporting is the ordinary state of the
+  web rather than a gap. This is why they are not in `SECURITY_HEADERS`: that
+  tuple is read three times — for `security`, for `missing`, and by
+  `_report_missing()` — and only the first is wanted here. Adding a header
+  there to get it inventoried mints an `<initials>-missing` code that fires on
+  nearly every site; the bijection tests catch it, but the design should not
+  need saving by them.
 - **Absent beats empty for passthrough.** No blob, no `raw` key; nothing known
   about the request, no `request` key. The rule that reconciles this with `data`
   always being `{}`: content this package *derived* is always present, content
@@ -274,6 +290,55 @@ suppression applies.
 
 ## Deliberately decided (do not re-litigate without new information)
 
+- **The whole reporting family is rated `note`**, `ip-endpoints-undefined`
+  included, which was re-rated down from `warning` on 2026-08-17. A reporting
+  failure costs the operator information and nothing else: no browser
+  protection is withheld by it, and there is no path through it for an attacker
+  to reach the site or its users. What makes it worth reporting at all is that
+  the operator plainly intended the reports to arrive — which is a `note`'s job
+  exactly, a fact with no defect in protection. Apply this to any reporting
+  code added later rather than rating it on how broken the configuration looks.
+- **A defect in an endpoint's *definition* belongs to the header that defined
+  it.** One endpoint URL nothing can be delivered to is one fact however many
+  policies name that group, so it is a finding on `Reporting-Endpoints` or
+  `Report-To` and the referencing policies stay quiet. Consequently
+  `_reporting_endpoint_names()` is **syntactic**: a policy naming a group that
+  something did define has done nothing wrong, and only a group nobody names at
+  all earns `<prefix>-report-to-undefined`. The reverse split — folding
+  deliverability into the group lookup — was implemented first and produces the
+  same defect up to four times with one fix between them.
+- **`Report-To` is deprecated but still honoured, and reading only
+  `Reporting-Endpoints` is a false positive.** BCD says `deprecated: true,
+  standard_track: false` (Chrome 70 / Firefox 149 / Safari never), and both
+  engines nonetheless parse it and act on it: Chromium wires it up at
+  `net/reporting/reporting_service.cc:250`, Firefox at
+  `dom/reporting/ReportingHeader.cpp:211`. A response defining its groups only
+  this way is configured correctly — the norm, in fact, in cloaked.pl's 2021
+  survey, where `Report-To` appears 50 times and `Reporting-Endpoints` not
+  once. **The general lesson, which is the reason this entry is here:** BCD's
+  `deprecated` flag means "do not reach for this", never "browsers ignore it".
+  That is a different trap from the `features.cc` one below, and it bites in
+  the opposite direction — there a value is parsed but not honoured, here a
+  header is disowned but still honoured.
+- **Endpoint *existence* is out of scope; endpoint *syntax* is not.** Whether
+  anything answers at a reporting URL needs a request, so it waits for the
+  active checks. Whether the header parses at all, whether a browser reads it
+  on this response, and whether each URL is one reports can be delivered to are
+  all answerable from the response alone, and all three are checked. Note the
+  parse question is real rather than pedantic: structured field dictionary keys
+  are lower-case by grammar (RFC 9651 `key = ( lcalpha / "*" ) *( lcalpha /
+  DIGIT / "_" / "-" / "." / "*" )`), and **both engines drop the entire header**
+  when the dictionary will not parse — Firefox `SFV::ParseDict(...); if
+  (!dict.IsValid()) return 0;`, Chromium `ParseDictionary` returning `nullopt`
+  — so one capital letter costs every group the header meant to define.
+- **The engines disagree about loopback reporting endpoints, and the spec sides
+  with Firefox.** Reporting API step 5.3 (`w3c/webref`
+  `ed/algorithms/reporting-1.json`) says "If endpoint url's origin is not
+  **potentially trustworthy**, then continue"; Firefox implements exactly that,
+  Chromium requires `SchemeIsCryptographic()` and so rejects
+  `http://localhost`. `_delivers()` therefore fires only on what *both* reject.
+  If Chromium relaxes toward the spec the predicate can widen; the reverse is
+  not on the cards.
 - **Not analyzed:** `Document-Policy` (no closed value set, no delegation axis, no
   concrete configuration points of its own); `X-Content-Security-Policy` /
   `X-WebKit-CSP` contents (no browser reads them, so content decides nothing).
@@ -376,6 +441,14 @@ suppression applies.
 
 ## Parked, with intent to do
 
+- **Reporting groups named by a *report-only* policy** — `csp-ro-`, `coop-ro-`,
+  `coep-ro-` and `ip-ro-` equivalents of the `-report-to-undefined` codes.
+  Deliberately not shipped, and the reason is not principle 6: an author
+  running a policy in report-only mode *knows* it is not enforcing and is
+  precisely the person who wants to hear that its plumbing is broken. It is
+  that in most responses this is noise, and the one audience it serves is
+  someone deliberately trialling a policy — which is a switch on a tool, not a
+  default of the analysis engine. Revisit with the CLI, not before.
 - **`Set-Cookie` analysis** — `Secure`, `HttpOnly`, `SameSite=None` without
   `Secure`, and the `__Host-` / `__Secure-` prefix rules. Both blockers are now
   gone: the mapping supports repeated headers, and `identity()` means a code can
@@ -778,7 +851,7 @@ sense `catalog.py` is:
 
 - `additional/insecure.txt` — **158 defect names over 93 distinct headers**,
   each written `Header: Defect` (`Access-Control-Allow-Origin: Unsafe Values`,
-  `Cache-Control: No Valid Directives`). This package has 86 codes over far
+  `Cache-Control: No Valid Directives`). This package has 96 codes over far
   fewer headers, so that file is a ready-made gap list. Read it for candidates,
   not as a specification, and rate anything taken from it by principle 3.
 - `additional/missing.txt` — the 14 headers humble reports as absent, against
@@ -1005,7 +1078,7 @@ Only the negatives that would otherwise look promising are kept:
 
 ## Status
 
-86 codes (34 error / 27 warning / 25 note), each with a rating and a message
-template, and every rendered sentence pinned by a snapshot. 269 tests, 111 test
+96 codes (35 error / 26 warning / 35 note), each with a rating and a message
+template, and every rendered sentence pinned by a snapshot. 324 tests, 153 test
 functions, all passing; `ruff check` clean. `pyproject.toml` is a placeholder — hatchling, no
 README yet, `hstspreload` declared as the optional `[preload]` extra.

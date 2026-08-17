@@ -59,6 +59,7 @@ def identity(finding):
 # a fact with no defect.
 FINDING_SEVERITY = {
     "acao-credentials-wildcard": "error",
+    "acao-invalid-origin": "error",
     "acao-multiple-origins": "error",
     "acao-null": "error",
     "coep-invalid": "error",
@@ -111,7 +112,21 @@ FINDING_SEVERITY = {
     "csp-no-object-src": "warning",
     "csp-unsafe-inline-style": "warning",
     "hsts-max-age-short": "warning",
-    "ip-endpoints-undefined": "warning",
+    # The reporting family is rated `note` throughout. A reporting failure
+    # costs the operator information and nothing else: no browser protection is
+    # withheld by it, and there is no way for an attacker to reach the site or
+    # its users through a report that was never collected. That the operator
+    # plainly meant the reports to arrive is what makes it worth saying at all.
+    "ip-endpoints-undefined": "note",
+    "csp-report-to-undefined": "note",
+    "coop-report-to-undefined": "note",
+    "coep-report-to-undefined": "note",
+    "re-endpoint-undeliverable": "note",
+    "re-ineffective": "note",
+    "re-invalid": "note",
+    "rt-endpoint-undeliverable": "note",
+    "rt-ineffective": "note",
+    "rt-invalid": "note",
     "ip-unknown-destination": "warning",
     "hsts-no-include-subdomains": "warning",
     "pp-empty": "warning",

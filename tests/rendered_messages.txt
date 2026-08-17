@@ -1,4 +1,14 @@
 acao-credentials-wildcard	Access-Control-Allow-Origin	present as * alongside Access-Control-Allow-Credentials: true, a combination browsers refuse outright, so every credentialed cross-origin request fails
+acao-invalid-origin	Access-Control-Allow-Origin	present but *.example.test is not a serialized origin, which browsers compare byte for byte, so it matches nothing and no cross-origin read succeeds
+acao-invalid-origin	Access-Control-Allow-Origin	present but HTTPS://example.test is not a serialized origin, which browsers compare byte for byte, so it matches nothing and no cross-origin read succeeds
+acao-invalid-origin	Access-Control-Allow-Origin	present but example.test is not a serialized origin, which browsers compare byte for byte, so it matches nothing and no cross-origin read succeeds
+acao-invalid-origin	Access-Control-Allow-Origin	present but https://*.example.test is not a serialized origin, which browsers compare byte for byte, so it matches nothing and no cross-origin read succeeds
+acao-invalid-origin	Access-Control-Allow-Origin	present but https://Example.test is not a serialized origin, which browsers compare byte for byte, so it matches nothing and no cross-origin read succeeds
+acao-invalid-origin	Access-Control-Allow-Origin	present but https://example.test#f is not a serialized origin, which browsers compare byte for byte, so it matches nothing and no cross-origin read succeeds
+acao-invalid-origin	Access-Control-Allow-Origin	present but https://example.test/ is not a serialized origin, which browsers compare byte for byte, so it matches nothing and no cross-origin read succeeds
+acao-invalid-origin	Access-Control-Allow-Origin	present but https://example.test/api is not a serialized origin, which browsers compare byte for byte, so it matches nothing and no cross-origin read succeeds
+acao-invalid-origin	Access-Control-Allow-Origin	present but https://example.test?x=1 is not a serialized origin, which browsers compare byte for byte, so it matches nothing and no cross-origin read succeeds
+acao-invalid-origin	Access-Control-Allow-Origin	present but https://user@example.test is not a serialized origin, which browsers compare byte for byte, so it matches nothing and no cross-origin read succeeds
 acao-multiple-origins	Access-Control-Allow-Origin	present but lists more than one origin (https://a.test https://b.test), which the header does not allow, so browsers reject it and no cross-origin read succeeds
 acao-multiple-origins	Access-Control-Allow-Origin	present but lists more than one origin (https://a.test, https://b.test), which the header does not allow, so browsers reject it and no cross-origin read succeeds
 acao-null	Access-Control-Allow-Origin	present but set to null, which any sandboxed iframe or data: URL can send as its Origin, so any page can read the response
@@ -7,9 +17,11 @@ coep-invalid	Cross-Origin-Embedder-Policy	present but has an unrecognised value 
 coep-invalid	Cross-Origin-Embedder-Policy	present but has an unrecognised value (require-corps); expected unsafe-none, require-corp or credentialless
 coep-missing	Cross-Origin-Embedder-Policy	missing
 coep-no-isolation	Cross-Origin-Embedder-Policy	present and opting in, but Cross-Origin-Opener-Policy is not same-origin, so crossOriginIsolated stays false and the SharedArrayBuffer-class APIs remain unavailable; expected for a document meant to be embedded, since COOP is inert in a frame
+coep-report-to-undefined	Cross-Origin-Embedder-Policy	present and reports to coep-ep, which no Reporting-Endpoints or Report-To header defines, so the policy applies and every report it would have sent is discarded
 coep-ro-unenforced	Cross-Origin-Embedder-Policy-Report-Only	present but Cross-Origin-Embedder-Policy is not, so the policy is measured and never applied; nothing here blocks anything
 coep-unsafe-none	Cross-Origin-Embedder-Policy	present but set to unsafe-none, which is the default and embeds cross-origin resources without requiring them to opt in
 coop-missing	Cross-Origin-Opener-Policy	missing
+coop-report-to-undefined	Cross-Origin-Opener-Policy	present and reports to coop-ep, which no Reporting-Endpoints or Report-To header defines, so the policy applies and every report it would have sent is discarded
 coop-ro-unenforced	Cross-Origin-Opener-Policy-Report-Only	present but Cross-Origin-Opener-Policy is not, so the policy is measured and never applied; nothing here blocks anything
 coop-unsafe-none	Cross-Origin-Opener-Policy	present but effectively unsafe-none (unsafe-none), which provides no cross-origin isolation
 coop-unsafe-none	Cross-Origin-Opener-Policy	present but effectively unsafe-none (unsafe-none; report-to="coop"), which provides no cross-origin isolation
@@ -40,6 +52,7 @@ csp-no-object-src	Content-Security-Policy	present but sets neither object-src no
 csp-nonce-weak	Content-Security-Policy	present but its nonce 'nonce-abc' is guessable: nonces need at least 8 base64 characters and a fresh value per response
 csp-nonce-weak	Content-Security-Policy	present but its nonce 'nonce-sh0rt!!' is guessable: nonces need at least 8 base64 characters and a fresh value per response
 csp-plain-scheme	Content-Security-Policy	present but allows the bare scheme https: in script-src, so anything served over it counts as an allowed source: every host on the web for http: and https:, any attacker-authored payload for data:
+csp-report-to-undefined	Content-Security-Policy	present and reports violations to csp-ep, which no Reporting-Endpoints or Report-To header defines, so the policy enforces and every violation it catches is discarded
 csp-ro-unenforced	Content-Security-Policy-Report-Only	present but Content-Security-Policy is not, so the policy is measured and never applied; nothing here blocks anything
 csp-unknown-directive	Content-Security-Policy	present but sets scritp-src, which no browser recognises, so that part of the policy does nothing
 csp-unsafe-eval	Content-Security-Policy	present but allows unsafe-eval in script-src, permitting strings to be executed as code
@@ -70,7 +83,7 @@ hsts-not-preloaded	Strict-Transport-Security	present with preload, but example.c
 hsts-preload-ineffective	Strict-Transport-Security	present with preload, but the preload list requires a max-age of at least 31536000 (one year) rather than 15768000, so the domain would not be accepted
 hsts-preload-ineffective	Strict-Transport-Security	present with preload, but the preload list requires includeSubDomains and a max-age of at least 31536000 (one year) rather than 15552000, so the domain would not be accepted
 hsts-preload-ineffective	Strict-Transport-Security	present with preload, but the preload list requires includeSubDomains, so the domain would not be accepted
-ip-endpoints-undefined	Integrity-Policy	present and reports to sri, which no Reporting-Endpoints header defines, so violations are caught and never delivered
+ip-endpoints-undefined	Integrity-Policy	present and reports to sri, which no Reporting-Endpoints or Report-To header defines, so violations are caught and never delivered
 ip-invalid	Integrity-Policy	present but is not a dictionary of inner lists (blocked-destinations=("script")); browsers parse the header whole or not at all, so nothing is enforced. The items of a list are separated by spaces, not commas, and are bare tokens rather than quoted strings
 ip-invalid	Integrity-Policy	present but is not a dictionary of inner lists (blocked-destinations=('script')); browsers parse the header whole or not at all, so nothing is enforced. The items of a list are separated by spaces, not commas, and are bare tokens rather than quoted strings
 ip-invalid	Integrity-Policy	present but is not a dictionary of inner lists (blocked-destinations=(script), sources=(invalid); browsers parse the header whole or not at all, so nothing is enforced. The items of a list are separated by spaces, not commas, and are bare tokens rather than quoted strings
@@ -92,11 +105,17 @@ pp-legacy-syntax	Permissions-Policy	present but written in the older Feature-Pol
 pp-missing	Permissions-Policy	missing
 pp-wildcard	Permissions-Policy	present but allows fullscreen in every origin (*), including third party frames the page embeds
 pp-wildcard	Permissions-Policy	present but allows geolocation in every origin (*), including third party frames the page embeds
+re-endpoint-undeliverable	Reporting-Endpoints	present but the endpoint behind csp-ep is not a URL browsers deliver reports to -- it must be HTTPS, or a loopback address -- so anything reporting to that group is discarded
+re-ineffective	Reporting-Endpoints	present on a response that did not arrive over HTTPS, where browsers ignore the header entirely, so every group it defines is undefined and no report of any kind is delivered
+re-invalid	Reporting-Endpoints	present but is not a structured field dictionary; browsers parse the header whole or not at all, so every group it meant to define is undefined. Keys are lower-case: a-z, digits and _ - . * only
 rp-invalid	Referrer-Policy	present but carries no recognised policy token (), so the browser default applies instead
 rp-invalid	Referrer-Policy	present but carries no recognised policy token (bogus,), so the browser default applies instead
 rp-invalid	Referrer-Policy	present but carries no recognised policy token (nonsense), so the browser default applies instead
 rp-missing	Referrer-Policy	missing
 rp-unsafe-url	Referrer-Policy	present but set to unsafe-url, which leaks the full URL, query string included, to third-party origins
+rt-endpoint-undeliverable	Report-To	present but the endpoint behind g is not a URL browsers deliver reports to -- it must be HTTPS, or a loopback address -- so anything reporting to that group is discarded
+rt-ineffective	Report-To	present on a response that did not arrive over HTTPS, where browsers ignore the header entirely, so every group it defines is undefined and no report of any kind is delivered
+rt-invalid	Report-To	present but its value is not the JSON the header is defined as carrying, so browsers read no endpoint group out of it at all
 xcsp-deprecated	X-Content-Security-Policy	present but no browser has read this header since Firefox 23; if it is the only policy sent, the page has none
 xcto-invalid	X-Content-Type-Options	present but set to sniff rather than nosniff, so MIME type sniffing stays enabled
 xcto-missing	X-Content-Type-Options	missing

@@ -53,6 +53,22 @@ def _bare_item(value):
     return value.split(";")[0].strip().lower()
 
 
+def _item_parameter(value, name):
+    """The value of one parameter of a structured field item, or None.
+
+    Reads the reporting group out of `same-origin; report-to="coop"`. Parameter
+    values here are strings, so the quotes are part of the syntax and not part
+    of the name; a bare token is accepted too, since a server that omits the
+    quotes has still said which group it means.
+    """
+    for parameter in value.split(";")[1:]:
+        key, separator, parameter_value = parameter.partition("=")
+        if not separator or key.strip().lower() != name:
+            continue
+        return parameter_value.strip().strip('"') or None
+    return None
+
+
 def _analyze_coop(value):
     # Browsers fall back to unsafe-none for unrecognised values, so an invalid
     # value and an explicit unsafe-none are the same defect.
@@ -117,7 +133,51 @@ def _analyze_acao(value):
         ]
     if origin == "*":
         return [Finding("Access-Control-Allow-Origin", "acao-wildcard")]
+    if not _is_serialized_origin(origin):
+        return [
+            Finding(
+                "Access-Control-Allow-Origin",
+                "acao-invalid-origin",
+                {"value": origin},
+            )
+        ]
     return []
+
+
+def _is_serialized_origin(value):
+    """Whether a browser could ever match this against a request's origin.
+
+    Every engine compares this header with the requesting origin as a byte
+    string and does nothing else with it -- Chromium
+    `*allow_origin_header != origin.Serialize()`, Firefox
+    `!allowedOriginHeader.Equals(origin)`, WebKit
+    `accessControlOriginString != securityOriginString`. So the question is not
+    whether the value parses as a URL; it is whether it can equal a serialized
+    origin, which is `scheme://host[:port]` and nothing else.
+
+    Deliberately structural, and deliberately not a URL parser. The scheme is
+    not checked against a list because `moz-extension://` and its kin are real
+    origins that appear in real configurations, and the host is not validated
+    because IDN and punycode cannot be judged from the value alone -- getting
+    either wrong costs a false positive on a working site, which is the one
+    outcome worth avoiding most.
+    """
+    scheme, separator, rest = value.partition("://")
+    if not separator or not scheme or not rest:
+        return False
+    # A path, query or fragment cannot appear in a serialized origin, and
+    # neither can userinfo: none of them survives serialization, so a value
+    # carrying one matches nothing. The bare trailing slash is the common case.
+    if any(character in rest for character in "/?#@"):
+        return False
+    # Wildcards are not a thing CORS has ever supported. Chromium is explicit:
+    # url_canon_host.cc gives '*' a lookup value of 0, so the host fails
+    # canonicalisation and the value is not even a valid URL.
+    if "*" in value:
+        return False
+    # Origins serialize lower-case and no engine folds case before comparing,
+    # so a capitalised scheme or host can never match one.
+    return value == value.lower()
 
 
 def _seeks_isolation(present):

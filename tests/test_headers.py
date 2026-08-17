@@ -159,6 +159,30 @@ ANALYZER_CASES = [
     ("Access-Control-Allow-Origin", "https://a.test https://b.test", ["acao-multiple-origins"]),
     ("Access-Control-Allow-Origin", "https://a.test, https://b.test", ["acao-multiple-origins"]),
     ("Access-Control-Allow-Origin", "*", ["acao-wildcard"]),
+    # All three engines compare this header byte-for-byte against the request's
+    # serialized origin -- Chromium `*allow_origin_header != origin.Serialize()`,
+    # Firefox `!allowedOriginHeader.Equals(origin)`, WebKit
+    # `accessControlOriginString != securityOriginString`. So a value that is
+    # not a serialized origin matches nothing, ever, and the CORS the operator
+    # configured is simply not happening.
+    ("Access-Control-Allow-Origin", "https://*.example.test", ["acao-invalid-origin"]),
+    ("Access-Control-Allow-Origin", "*.example.test", ["acao-invalid-origin"]),
+    ("Access-Control-Allow-Origin", "example.test", ["acao-invalid-origin"]),
+    # a serialized origin has no path -- not even the bare slash a copy-paste
+    # from the address bar leaves behind
+    ("Access-Control-Allow-Origin", "https://example.test/", ["acao-invalid-origin"]),
+    ("Access-Control-Allow-Origin", "https://example.test/api", ["acao-invalid-origin"]),
+    ("Access-Control-Allow-Origin", "https://example.test?x=1", ["acao-invalid-origin"]),
+    ("Access-Control-Allow-Origin", "https://example.test#f", ["acao-invalid-origin"]),
+    ("Access-Control-Allow-Origin", "https://user@example.test", ["acao-invalid-origin"]),
+    # the request's origin is always serialized lower-case, and no engine folds
+    # case before comparing, so a capitalised one can never match either
+    ("Access-Control-Allow-Origin", "https://Example.test", ["acao-invalid-origin"]),
+    ("Access-Control-Allow-Origin", "HTTPS://example.test", ["acao-invalid-origin"]),
+    # ...and the shapes that are valid serialized origins must stay silent
+    ("Access-Control-Allow-Origin", "https://example.test:8443", []),
+    ("Access-Control-Allow-Origin", "http://localhost:3000", []),
+    ("Access-Control-Allow-Origin", "moz-extension://a1b2c3", []),
     # Content-Type. Only the charset parameter is decidable from a header that
     # describes a body nobody here sees, and only for markup a browser parses.
     ("Content-Type", "text/html; charset=UTF-8", []),
@@ -667,10 +691,13 @@ ISOLATION_CASES = [
          "cross-origin-embedder-policy": "credentialless"},
         ["coep-no-isolation", "corp-missing"],
     ),
-    # the reporting integration's parameters must not change any of this
+    # the reporting integration's parameters must not change any of this -- the
+    # groups are defined here so that the isolation verdict is what is under
+    # test and not the reporting cross-check
     (
         {"cross-origin-opener-policy": 'same-origin; report-to="coop"',
-         "cross-origin-embedder-policy": 'require-corp; report-to="coep"'},
+         "cross-origin-embedder-policy": 'require-corp; report-to="coep"',
+         "reporting-endpoints": 'coop="https://example.test/c", coep="https://example.test/e"'},
         ["corp-missing"],
     ),
     # a typo is still a typo: the operator meant to opt in and did not
@@ -811,9 +838,20 @@ def _emitted():
         WILDCARD_WITH_CREDENTIALS,
         REPORT_ONLY_ONLY,
         REPORTS_NOWHERE,
+        CSP_REPORTS_NOWHERE,
+        COOP_REPORTS_NOWHERE,
+        COEP_REPORTS_NOWHERE,
+        UNDELIVERABLE_ENDPOINT,
+        INVALID_ENDPOINTS,
+        LEGACY_UNDELIVERABLE,
+        LEGACY_INVALID,
         {"x-frame-options": ["DENY", "SAMEORIGIN"]},
     ):
         yield from headers.analyze_all(present)
+    # the -ineffective pair needs the response to have arrived over plaintext,
+    # which no other case in this corpus does
+    for present in (DEFINED_ENDPOINT, LEGACY_DEFINED):
+        yield from headers.analyze_all(present, secure=False, host="example.test")
     for present, _ in ISOLATION_CASES:
         yield from headers.analyze_all(present)
     with mock.patch.object(hsts, "hstspreload", FakePreloadList()):
@@ -837,6 +875,16 @@ def _every_code_headers_can_emit():
     # ...and ip-endpoints-undefined needs a policy naming a group beside a
     # Reporting-Endpoints header that does not define it
     codes |= {f.code for f in headers.analyze_all(REPORTS_NOWHERE)}
+    # ...and the three other headers that name a reporting group the same way
+    for present in (CSP_REPORTS_NOWHERE, COOP_REPORTS_NOWHERE, COEP_REPORTS_NOWHERE,
+                    UNDELIVERABLE_ENDPOINT, INVALID_ENDPOINTS, LEGACY_UNDELIVERABLE,
+                    LEGACY_INVALID):
+        codes |= {f.code for f in headers.analyze_all(present)}
+    # ...and the -ineffective pair, which only exists on a plaintext response
+    for present in (DEFINED_ENDPOINT, LEGACY_DEFINED):
+        codes |= {
+            f.code for f in headers.analyze_all(present, secure=False, host="example.test")
+        }
     codes |= {f.code for f in headers.analyze_all({"x-frame-options": ["DENY", "SAMEORIGIN"]})}
     # hsts-not-preloaded needs the optional preload list to be emittable at all
     with mock.patch.object(hsts, "hstspreload", FakePreloadList()):
@@ -1109,7 +1157,7 @@ def test_severity_values_match_the_documented_policy():
     # The completeness tests above check only which codes are rated. These
     # anchor what they are rated, so a flipped value cannot land silently.
     counts = collections.Counter(headers.FINDING_SEVERITY.values())
-    assert counts == {"error": 34, "warning": 27, "note": 25}
+    assert counts == {"error": 35, "warning": 26, "note": 35}
     # An explicitly-defaulted header is rated exactly as its absence is, so
     # neither spelling of the same posture reads better than the other
     assert (
@@ -1301,6 +1349,22 @@ def test_a_policy_that_names_no_endpoints_is_not_asked_about_reporting():
     assert ip_codes({"integrity-policy": "blocked-destinations=(script)"}) == []
 
 
+def test_an_unreadable_report_to_earns_integrity_policy_the_doubt_too():
+    present = dict(REPORTS_NOWHERE, **{"report-to": "not json at all"})
+    assert ip_codes(present) == []
+
+
+def test_a_policy_that_blocks_nothing_is_not_asked_about_reporting():
+    # _analyze_ip already answers "once the policy enforces nothing, what its
+    # other directives say decides nothing either" -- the cross-header rule has
+    # to agree, or it renders "violations are caught and never delivered" about
+    # a policy that can catch none
+    assert ip_codes({"integrity-policy": "endpoints=(ep)"}) == ["ip-no-blocked-destinations"]
+    assert ip_codes({"integrity-policy": "blocked-destinations=(style), endpoints=(ep)"}) == [
+        "ip-no-blocked-destinations"
+    ]
+
+
 def test_an_unparseable_policy_is_not_also_asked_about_reporting():
     # it enforces nothing, so where it would have reported decides nothing
     assert ip_codes({"integrity-policy": "blocked-destinations=script"}) == ["ip-invalid"]
@@ -1316,6 +1380,350 @@ def test_the_report_only_spelling_is_left_alone():
 def test_the_content_of_a_report_only_header_is_not_judged():
     # it blocks nothing, so what it permits decides nothing
     assert headers.analyze("Content-Security-Policy-Report-Only", "script-src 'unsafe-inline'") == []
+
+
+# ---------------------------------------------------------------------------
+# CSP, COOP and COEP reporting groups
+# ---------------------------------------------------------------------------
+# The same defect Integrity-Policy already reports, for the three other headers
+# that name a reporting group. Each still enforces; what it loses is any way of
+# finding out that it fired.
+
+CSP_REPORTS_NOWHERE = {
+    "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; report-to csp-ep"
+}
+COOP_REPORTS_NOWHERE = {"cross-origin-opener-policy": 'same-origin; report-to="coop-ep"'}
+COEP_REPORTS_NOWHERE = {"cross-origin-embedder-policy": 'require-corp; report-to="coep-ep"'}
+UNDELIVERABLE_ENDPOINT = {"reporting-endpoints": 'csp-ep="http://example.test/r"'}
+DEFINED_ENDPOINT = {"reporting-endpoints": 'csp-ep="https://example.test/r"'}
+INVALID_ENDPOINTS = {"reporting-endpoints": 'CSP-EP="https://example.test/r"'}
+LEGACY_UNDELIVERABLE = {"report-to": '{"group":"g","endpoints":[{"url":"http://example.test/r"}]}'}
+LEGACY_DEFINED = {"report-to": '{"group":"g","endpoints":[{"url":"https://example.test/r"}]}'}
+LEGACY_INVALID = {"report-to": "not json at all"}
+
+
+def group_codes(present):
+    return sorted(
+        f.code for f in headers.analyze_all(present) if f.code.endswith("-report-to-undefined")
+    )
+
+
+def test_a_csp_reporting_group_nothing_defines_is_reported():
+    assert group_codes(CSP_REPORTS_NOWHERE) == ["csp-report-to-undefined"]
+
+
+def test_a_coop_reporting_group_nothing_defines_is_reported():
+    assert group_codes(COOP_REPORTS_NOWHERE) == ["coop-report-to-undefined"]
+
+
+def test_a_coep_reporting_group_nothing_defines_is_reported():
+    assert group_codes(COEP_REPORTS_NOWHERE) == ["coep-report-to-undefined"]
+
+
+def test_a_defined_group_is_ordinary_practice():
+    present = dict(CSP_REPORTS_NOWHERE, **{"reporting-endpoints": 'csp-ep="https://example.test/r"'})
+    assert group_codes(present) == []
+
+
+def test_only_the_group_the_policy_names_counts():
+    present = dict(CSP_REPORTS_NOWHERE, **{"reporting-endpoints": 'other="https://example.test/r"'})
+    assert group_codes(present) == ["csp-report-to-undefined"]
+
+
+def test_a_policy_naming_no_group_is_not_asked_about_reporting():
+    assert group_codes({"content-security-policy": "default-src 'none'"}) == []
+    assert group_codes({"cross-origin-opener-policy": "same-origin"}) == []
+
+
+def test_a_policy_that_applies_nothing_is_not_asked_about_reporting():
+    # COEP unsafe-none opts into nothing, so it blocks nothing, so it has
+    # nothing to report -- and the sentence this code renders ("the policy
+    # applies and every report it would have sent is discarded") would be false
+    assert group_codes({"cross-origin-embedder-policy": 'unsafe-none; report-to="grp"'}) == []
+    assert group_codes({"cross-origin-opener-policy": 'unsafe-none; report-to="grp"'}) == []
+
+
+def test_a_policy_browsers_will_not_honour_is_not_asked_about_reporting():
+    # an unrecognised value falls back to unsafe-none, which is the same case
+    assert group_codes({"cross-origin-embedder-policy": 'require-corps; report-to="grp"'}) == []
+    assert group_codes({"cross-origin-opener-policy": 'same-origins; report-to="grp"'}) == []
+
+
+def test_some_other_parameter_is_not_mistaken_for_a_reporting_group():
+    # a structured field item may carry any parameter; only report-to names a
+    # group, and reading the wrong one invents a finding out of nothing
+    assert group_codes({"cross-origin-opener-policy": 'same-origin; anonymous="x"'}) == []
+    assert group_codes({"cross-origin-embedder-policy": 'require-corp; foo="bar"'}) == []
+
+
+def test_the_data_carries_every_undefined_group():
+    present = {
+        "content-security-policy": "default-src 'none'; report-to a b",
+        "reporting-endpoints": 'b="https://example.test/r"',
+    }
+    finding = next(f for f in headers.analyze_all(present) if f.code == "csp-report-to-undefined")
+    assert finding.data == {"groups": ["a"]}
+
+
+def test_report_only_spellings_are_left_alone():
+    # parked deliberately: a report-only policy is a trial the author knows is
+    # not enforcing, so its plumbing belongs behind a tool's switch
+    present = {
+        "content-security-policy-report-only": "default-src 'none'; report-to csp-ep",
+        "cross-origin-opener-policy-report-only": 'same-origin; report-to="coop-ep"',
+    }
+    assert group_codes(present) == []
+
+
+# -- an endpoint the browser will not deliver to ------------------------------
+# A defect in the endpoint's definition belongs to the header that defined it,
+# not to every policy that named the group: one bad URL is one fact however
+# many policies point at it. So the group counts as defined -- the referencing
+# headers stay quiet -- and Reporting-Endpoints answers for the URL.
+
+
+def endpoint_codes(present, **kwargs):
+    # both spellings of the defining header, so a code cannot hide behind the
+    # prefix the helper happens to look for
+    return sorted(
+        f.code
+        for f in headers.analyze_all(present, **kwargs)
+        if f.code.startswith(("re-", "rt-"))
+    )
+
+
+def test_an_endpoint_the_browser_discards_is_the_defining_headers_defect():
+    present = dict(CSP_REPORTS_NOWHERE, **{"reporting-endpoints": 'csp-ep="http://example.test/r"'})
+    assert endpoint_codes(present) == ["re-endpoint-undeliverable"]
+    # ...and the policy that named it is not also blamed for it
+    assert group_codes(present) == []
+
+
+def test_the_undeliverable_endpoint_is_named():
+    present = {"reporting-endpoints": 'a="http://example.test/r", b="https://example.test/r"'}
+    finding, = [f for f in headers.analyze_all(present) if f.code == "re-endpoint-undeliverable"]
+    assert finding.data == {"endpoints": ["a"]}
+
+
+def test_an_undeliverable_endpoint_nothing_references_is_still_reported():
+    # the defect is in the definition, so it does not depend on being used
+    assert endpoint_codes({"reporting-endpoints": 'a="http://example.test/r"'}) == [
+        "re-endpoint-undeliverable"
+    ]
+
+
+def test_a_loopback_endpoint_is_left_alone():
+    # the engines disagree here -- Firefox delivers to it, Chromium does not --
+    # so it is not a defect we can assert
+    present = dict(CSP_REPORTS_NOWHERE, **{"reporting-endpoints": 'csp-ep="http://localhost:9000/r"'})
+    assert endpoint_codes(present) == []
+    assert group_codes(present) == []
+
+
+# -- the whole header is void on a plaintext response -------------------------
+# Reporting API step 1: "Abort these steps if response's HTTPS state is not
+# 'modern', and the origin of response's url is not potentially trustworthy."
+# So every group it defines is undefined -- which is one fact about the header,
+# not four about the policies that named its groups.
+
+
+def test_reporting_is_ineffective_on_a_plaintext_response():
+    present = dict(CSP_REPORTS_NOWHERE, **{"reporting-endpoints": 'csp-ep="https://example.test/r"'})
+    assert endpoint_codes(present, secure=False, host="example.test") == ["re-ineffective"]
+    # the policy naming the group is not blamed for the response's scheme
+    assert group_codes(present) == []
+
+
+def test_reporting_over_plaintext_loopback_is_left_alone():
+    # a loopback origin is potentially trustworthy, so the header applies
+    present = {"reporting-endpoints": 'csp-ep="https://example.test/r"'}
+    assert endpoint_codes(present, secure=False, host="localhost") == []
+
+
+def test_a_secure_response_is_not_told_its_reporting_is_ineffective():
+    present = {"reporting-endpoints": 'csp-ep="https://example.test/r"'}
+    assert endpoint_codes(present, secure=True, host="example.test") == []
+
+
+# -- Report-To, the predecessor, still defines groups -------------------------
+# It is deprecated in favour of Reporting-Endpoints and BCD marks it so, but
+# both engines still parse and honour it -- Chromium reporting_service.cc:250,
+# Firefox ReportingHeader.cpp:211. A response that defines its groups only this
+# way is configured correctly, so reading only Reporting-Endpoints invents a
+# defect where there is none.
+
+
+def test_a_group_defined_by_report_to_is_defined():
+    present = dict(
+        CSP_REPORTS_NOWHERE,
+        **{"report-to": '{"group":"csp-ep","max_age":10886400,'
+                        '"endpoints":[{"url":"https://example.test/r"}]}'},
+    )
+    assert group_codes(present) == []
+
+
+def test_report_to_without_a_group_name_defines_the_default_group():
+    present = {
+        "content-security-policy": "default-src 'none'; report-to default",
+        "report-to": '{"max_age":10886400,"endpoints":[{"url":"https://example.test/r"}]}',
+    }
+    assert group_codes(present) == []
+
+
+def test_several_report_to_groups_are_all_defined():
+    present = {
+        "content-security-policy": "default-src 'none'; report-to b",
+        "report-to": '{"group":"a","endpoints":[{"url":"https://example.test/a"}]},'
+                     '{"group":"b","endpoints":[{"url":"https://example.test/b"}]}',
+    }
+    assert group_codes(present) == []
+
+
+def test_an_unreadable_report_to_earns_the_benefit_of_the_doubt():
+    # it may well define the group; claiming otherwise is the false positive
+    # this package exists to avoid
+    present = dict(CSP_REPORTS_NOWHERE, **{"report-to": "not json at all"})
+    assert group_codes(present) == []
+
+
+def test_a_report_to_that_defines_some_other_group_still_leaves_this_one_undefined():
+    present = dict(
+        CSP_REPORTS_NOWHERE,
+        **{"report-to": '{"group":"other","endpoints":[{"url":"https://example.test/r"}]}'},
+    )
+    assert group_codes(present) == ["csp-report-to-undefined"]
+
+
+# -- syntax of the definitions themselves --------------------------------------
+# Whether an endpoint answers is an active question and out of scope. Whether
+# the header that declares it is well formed is not: both engines drop a
+# Reporting-Endpoints header whose dictionary will not parse -- Firefox
+# `SFV::ParseDict(...); if (!dict.IsValid()) return 0;`, Chromium
+# ParseDictionary returning nullopt -- and structured field keys are lowercase
+# by grammar (RFC 9651: key = ( lcalpha / "*" ) *( lcalpha / DIGIT / "_" / "-"
+# / "." / "*" )).
+
+
+def test_an_uppercase_key_voids_the_whole_header():
+    assert endpoint_codes({"reporting-endpoints": 'CSP-EP="https://example.test/r"'}) == [
+        "re-invalid"
+    ]
+
+
+def test_a_key_with_a_forbidden_character_voids_the_whole_header():
+    assert endpoint_codes({"reporting-endpoints": 'csp ep="https://example.test/r"'}) == [
+        "re-invalid"
+    ]
+
+
+def test_the_keys_the_grammar_allows_are_left_alone():
+    present = {"reporting-endpoints": 'csp-ep_1.a="https://example.test/r", *b="https://example.test/s"'}
+    assert endpoint_codes(present) == []
+
+
+def test_a_policy_naming_a_group_in_a_void_header_is_not_blamed_for_it():
+    # the defect is the header's, and reporting it against every policy that
+    # named one of its groups would be the same fact up to four times
+    present = dict(CSP_REPORTS_NOWHERE, **{"reporting-endpoints": 'CSP-EP="https://example.test/r"'})
+    assert group_codes(present) == []
+
+
+# -- Report-To gets the same treatment ----------------------------------------
+# Deprecated is not unhonoured: both engines still read it, and Chromium runs
+# its endpoints through the very same ProcessEndpointURLString.
+
+
+def test_a_report_to_endpoint_the_browser_discards_is_reported():
+    present = {"report-to": '{"group":"g","endpoints":[{"url":"http://example.test/r"}]}'}
+    assert endpoint_codes(present) == ["rt-endpoint-undeliverable"]
+
+
+def test_a_report_to_that_is_not_json_is_reported():
+    assert endpoint_codes({"report-to": "not json at all"}) == ["rt-invalid"]
+
+
+def test_a_well_formed_report_to_is_left_alone():
+    present = {"report-to": '{"group":"g","endpoints":[{"url":"https://example.test/r"}]}'}
+    assert endpoint_codes(present) == []
+
+
+def test_report_to_is_ineffective_on_a_plaintext_response():
+    present = {"report-to": '{"group":"g","endpoints":[{"url":"https://example.test/r"}]}'}
+    assert endpoint_codes(present, secure=False, host="example.test") == ["rt-ineffective"]
+
+
+def test_report_to_is_inventoried_but_never_reported_missing():
+    inventory = headers.inventory({"report-to": '{"group":"g","endpoints":[]}'})
+    assert "Report-To" in inventory["security"]
+    assert "Report-To" not in headers.inventory({})["missing"]
+
+
+def test_reporting_endpoints_is_inventoried_when_present():
+    inventory = headers.inventory({"reporting-endpoints": 'csp-ep="https://example.test/r"'})
+    assert "Reporting-Endpoints" in inventory["security"]
+
+
+def test_reporting_endpoints_is_never_reported_missing():
+    # a response that configures no reporting is the ordinary state of the web,
+    # so its absence is not a gap and must reach neither list nor finding
+    inventory = headers.inventory({})
+    assert "Reporting-Endpoints" not in inventory["missing"]
+    assert not [f for f in headers.analyze_all({}) if f.header == "Reporting-Endpoints"]
+
+
+def test_the_whole_loopback_range_is_left_alone():
+    # potentially trustworthy is 127.0.0.0/8, not just 127.0.0.1
+    present = dict(CSP_REPORTS_NOWHERE, **{"reporting-endpoints": 'csp-ep="http://127.0.0.2/r"'})
+    assert group_codes(present) == []
+
+
+def test_a_bracketed_ipv6_loopback_endpoint_is_left_alone():
+    # the port comes off after the closing bracket, not at the first colon
+    present = dict(CSP_REPORTS_NOWHERE, **{"reporting-endpoints": 'csp-ep="http://[::1]:9000/r"'})
+    assert group_codes(present) == []
+
+
+def test_a_relative_endpoint_is_left_alone():
+    # both engines resolve it against the document's own origin
+    present = dict(CSP_REPORTS_NOWHERE, **{"reporting-endpoints": 'csp-ep="/reports"'})
+    assert group_codes(present) == []
+
+
+def test_a_comma_inside_a_quoted_url_does_not_invent_a_group():
+    present = {
+        "content-security-policy": "default-src 'none'; report-to b",
+        "reporting-endpoints": 'csp-ep="https://example.test/r?a=1,b=2"',
+    }
+    assert group_codes(present) == ["csp-report-to-undefined"]
+
+
+# -- repeated CSP ------------------------------------------------------------
+# Each policy carries its own report-to, and a browser enforces every policy,
+# so a group undefined for one policy is that policy's reports going nowhere
+# whatever its siblings say. Any policy counts, as with the syntax codes.
+
+
+def test_any_policy_reporting_nowhere_counts():
+    present = {
+        "content-security-policy": [
+            "default-src 'none'; report-to good",
+            "default-src 'none'; report-to bad",
+        ],
+        "reporting-endpoints": 'good="https://example.test/r"',
+    }
+    finding = next(f for f in headers.analyze_all(present) if f.code == "csp-report-to-undefined")
+    assert finding.data == {"groups": ["bad"]}
+
+
+def test_repeated_headers_that_disagree_earn_nothing():
+    # no specification says which COOP wins, so nothing can be concluded
+    present = {
+        "cross-origin-opener-policy": [
+            'same-origin; report-to="a"',
+            'same-origin; report-to="b"',
+        ]
+    }
+    assert group_codes(present) == []
 
 
 def test_report_only_findings_come_out_in_table_order():
