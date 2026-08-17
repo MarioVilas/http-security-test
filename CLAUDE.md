@@ -263,6 +263,10 @@ suppression applies.
 - **Never commit.** The human owns the git workflow entirely — no `git add`,
   `commit`, `stash`, or anything that changes git state. An agent ran `git stash`
   once and flattened their staged changes.
+- **Never maintain `/home/crapula/ref`.** The human has their own tooling for
+  that whole tree — no syncing, fetching, updating, pruning or cleanup, and no
+  state-changing git command in any checkout under it. Read it; that is all. The
+  reference section repeats this where the sync sources are recorded.
 - **They run `ruff format`.** Keep `ruff check` clean; do not reformat.
 - **Ask, with options and a recommendation,** on policy and design calls
   (severity, schema, scope). They engage closely and will push back with evidence
@@ -280,6 +284,14 @@ suppression applies.
   Chrome 131, Safari 18.4, Firefox `false` (and `webview_android` `false`).
   The "~84 %" this used to cite came off caniuse.com, which renders BCD; the
   versions above are the on-disk fact and the ones to recheck.
+  **Confirmed in Chromium source 2026-08-17**, which matters because the parser
+  gates the value on a feature flag —
+  `cross_origin_opener_policy_parser.cc:66` accepts it only when
+  `features::kCoopNoopenerAllowPopups` is enabled, and that flag is
+  `FEATURE_ENABLED_BY_DEFAULT` at `features.cc:89`. So BCD's "Chrome 131" is
+  right and the guard is a launched-feature remnant. Worth knowing as a pattern:
+  in Chromium a value being *parsed* is not the same as it being *honoured*, and
+  `features.cc` is where the difference lives.
 - `HSTS_MIN_MAX_AGE = 15552000` (180 days), chosen over the 6-month figure
   because it is what sites actually send. Now measured rather than recalled:
   of the 55 349 `Strict-Transport-Security` values carrying a `max-age` in
@@ -328,7 +340,12 @@ suppression applies.
   `documentation/browser-compat-data/http/headers/Integrity-Policy.json`.
   Verified still true 2026-08-16: Chrome `false`, Safari `false`, Firefox 142
   pref-gated, against `blocked-destinations_script` at Chrome 138 /
-  Firefox 145 / Safari 26.
+  Firefox 145 / Safari 26. **Chromium source agrees, and more strongly than BCD
+  can** (2026-08-17): `integrity_policy_parser.cc:36` accepts
+  `blocked-destinations=script` and `sources=inline` and pushes every other
+  token onto `parsing_errors` as "not supported". That is a closed value set in
+  code, not an absence of support inferred from a table, so
+  `IP_BLOCKING_DESTINATIONS` is on firm ground until that `if` grows a branch.
 - **Integrity-Policy's `endpoints` is unreliable in Firefox** — it enforces the
   blocking from 145 but ignores the directive and logs violations to the
   console instead. MDN BCD carries this as `partial_implementation: true` on
@@ -345,16 +362,85 @@ suppression applies.
   gone: the mapping supports repeated headers, and `identity()` means a code can
   fire more than once against one header without the second being deduped away.
   Put the cookie's name in `data` so two cookies are two findings.
-  Scope note from MDN BCD's `http/headers/Set-Cookie.json`, which breaks the
-  header down by attribute and is the place to settle this before writing
-  codes: there is now a **third** name prefix in the wild,
-  `__Host-Http-` (BCD node `http_host-http_prefixes`, Chrome 140, Firefox 143,
-  Safari `false`; Firefox 142 shipped it briefly as `__HostHttp-`). The two the
-  item was written around are `host_secure_prefixes`, Chrome 49 / Firefox 50 /
-  Safari 13 — universally supported, so a prefix violation is a real defect
-  everywhere. `Partitioned` (CHIPS) is Chrome 114 / Firefox 141 / Safari 26.2
-  and is *not* a security defect either way. Read the spec for `__Host-Http-`
-  before rating it; BCD gives support, not semantics.
+
+  **The prefix rules are settled — from the specs *and* from source, which
+  agree — and there are four of them, not the two this item was written
+  around.** Chromium's `net/cookies/cookie_util.cc`, Firefox's
+  `netwerk/cookie/CookiePrefixes.cpp` and the draft text all match exactly;
+  read the Firefox file first, it is 102 lines. All four build on `__Secure-`,
+  and `__Host-Http-` is the conjunction of the two below it — it is a lattice,
+  not a chain, so `__Host-` does *not* imply `HttpOnly`:
+
+  | prefix | requires |
+  |---|---|
+  | `__Secure-` | `Secure`, on a secure origin |
+  | `__Http-` | `Secure` + `HttpOnly` |
+  | `__Host-` | `Secure` + `Path=/` + **no** `Domain` |
+  | `__Host-Http-` | `Secure` + `HttpOnly` + `Path=/` + no `Domain` |
+
+  Three things that will bite an implementation, all verified rather than
+  assumed:
+  - **Match longest-prefix-first.** Both engines order their prefix tables so
+    `__Host-Http-` is tested before `__Host-`, and both carry a comment saying
+    why. A naive `name.startswith('__Host-')` classifies `__Host-Http-sid` as
+    `__Host-` and then fails to require `HttpOnly` — a false negative that
+    looks like a pass.
+  - **Matching is case-INSENSITIVE**, which contradicts the obvious reading of
+    the spec. Chromium's `GetCookiePrefix()` uses
+    `base::CompareCase::INSENSITIVE_ASCII`; Firefox uses
+    `nsCaseInsensitiveCStringComparator` and explains the discrepancy in a
+    comment: RFC 6265bis §5.4 requires UAs to match case-insensitively even
+    though §4.1.3 describes the prefixes with "case-sensitive match" wording,
+    because that wording is about server-side semantics, not UA enforcement.
+    So `__SECURE-sid` must be held to the `__Secure-` rules. Firefox's comment
+    gives the reason: otherwise a server that compares names case-insensitively
+    would accept a miscapitalised prefix without the guarantees it implies.
+  - **A prefix hiding in the *value* of a nameless cookie is its own defect.**
+    Chromium's `HasHiddenPrefixName()` fires only when the name is empty
+    (`canonical_cookie.cc:397` and `:701`) and the cookie is then excluded
+    outright with `EXCLUDE_INVALID_PREFIX`. The case it stops is
+    `Set-Cookie: =__Host-sid=x`, which something downstream re-parses as a
+    `__Host-sid` cookie that never met the rules. Note this one matches the
+    prefix case-insensitively too, and after trimming leading SP/HTAB.
+
+  BCD is still the source for *which engine and which version*, in
+  `http/headers/Set-Cookie.json`: `host_secure_prefixes` is Chrome 49 /
+  Firefox 50 / Safari 13, so violating those two is a real defect everywhere;
+  `http_host-http_prefixes` is Chrome 140 / Firefox 143 / Safari `false`
+  (Firefox 142 shipped it briefly as `__HostHttp-`). **Look `__Http-` up there
+  before rating it** — it is in both engines' source but its BCD versions have
+  not been checked here, and a prefix Safari ignores cannot be rated the same
+  way as one it enforces. `Partitioned` (CHIPS) is Chrome 114 / Firefox 141 /
+  Safari 26.2 and is *not* a security defect either way.
+
+  **Where the specs are, and it is two drafts, not one.** No published RFC
+  carries these rules — `rfc6265.txt` does not contain `__Secure-` anywhere and
+  the RFC index lists no HTTP cookie RFC after 6265, so `documentation/`
+  `rfc-library` cannot answer this and is not at fault for it. Verified against
+  the draft text 2026-08-17:
+  - `__Secure-` and `__Host-` are `draft-ietf-httpbis-rfc6265bis` §4.1.3.1 and
+    §4.1.3.2. Current revision is **-22** (2025-12-01); the URL in Chromium's
+    `net/cookies/cookie_constants.h:391` cites **-13**, so treat any section
+    number copied out of browser source as needing a re-check.
+  - `__Http-` and `__Host-Http-` are **not in 6265bis at all** — zero
+    occurrences in -22, whose §4.1.3 has only the two subsections. They are
+    `draft-ietf-httpbis-layered-cookies` §4.1.3.3 and §4.1.3.4, currently
+    **-02** (2026-05-22). Firefox's comments attribute all four to
+    "RFC 6265bis §4.1.3", which is loose; do not copy that attribution.
+  - The case-insensitivity requirement is normative and lives in 6265bis
+    **§5.4**: "UAs MUST match the prefix string case-insensitively", explicitly
+    differing from the servers' §4.1.3 framing. Both engines apply it to all
+    four prefixes.
+  - **Cookie names themselves stay case-sensitive** (§5.4's own example):
+    `__Secure-foo` and `__secure-foo` are two distinct cookies that both have to
+    satisfy the `__Secure-` rules. That matters for keying — the cookie name in
+    `data` is a case-sensitive identifier even though the prefix test is not.
+
+  Neither draft is in `rfc-library`'s tracked tree; if they are on disk they are
+  under its `mirror/`, which the human maintains — do not fetch them, and if
+  they are absent, work from the browser sources and say the draft was not
+  available. And WebKit is no help here — its only prefix code is the curl
+  backend.
 - **The cache/cookie cross-header quirk — land it *with* the cookie parser, not
   before.** RFC 9111 §7.3: "the Set-Cookie response header field does not inhibit
   caching; a cacheable response with a Set-Cookie header field can be (and often
@@ -406,14 +492,25 @@ For reading and analysis only, do not copy. They live at
 `/home/crapula/ref/<category>/<repo>`, the subdirectory naming the kind of
 material: `documentation`, `security`, `burp`, `cookie_security`,
 `web_browsers`, `web_servers`, `web_app_servers`, `operating_systems`. All
-third-party, all read-only — no write operations, ever. All are git checkouts
-except `web_browsers/lynx2.9.3`, which is an unpacked tarball, so `git log` /
-`git show` are available for history on the rest.
+git checkouts except `web_browsers/lynx2.9.3`, which is an unpacked tarball, so
+`git log` / `git show` are available for history on the rest.
+
+**Read, and nothing else. The human maintains this tree with their own tooling
+and an agent does no maintenance on it — ever.** That means no writes, and also
+no `rsync`, no fetching or updating a checkout, no pruning, no cleanup of files
+that look stray, and no git command that changes state anywhere under
+`/home/crapula/ref`. Sizes, staleness and what is or is not mirrored are not
+problems to fix here; if something needed is missing, say so and stop. Where a
+sync source is documented below it is recorded so the *fact* is checkable, not
+as a task to run.
 
 **This section is a whitelist, not a sample.** What is named below was surveyed
 once and verified rather than assumed, and is the whole of what this project
 cares about; the closing subsection says what to do with everything else. Sizes
-matter — `web_browsers/WebKit` is 6.4 GB, `operating_systems/nt5src` is 7.1 GB
+matter, and they grow with every fetch, so re-measure rather than trust these:
+`web_browsers/chromium` is **70 GB** (64 GB of it `.git`, so `git log` is cheap
+and a tree-wide `grep` is not), `web_browsers/WebKit` is 19 GB,
+`web_browsers/firefox` is 11 GB, `operating_systems/nt5src` is 9.1 GB
 and `burp/http-request-smuggler` is 154 MB — so scope every `grep` to a
 subdirectory.
 
@@ -518,31 +615,101 @@ behind `security.integrity_policy.stylesheet.enabled`; COOP
 `noopener-allow-popups` is Chrome 131 / Safari 18.4 / Firefox `false`. Recheck
 them there, not from memory.
 
-**`documentation/rfc-library`** — the full RFC/STD/BCP/FYI archive as plain
-text, laid out `rfc/NNNNN-NNNNN/rfcNNNN.txt`, with `indexes/rfc-index.txt` to
-search by title. The ones this package reasons from: **9110** (HTTP
-semantics), **9111** (caching — §5.4 on `Pragma`, §7.3 on `Set-Cookie` and
-shared caches, both quoted in the parked items), **6797** (HSTS), **6265**
-(cookies), **7034** (`X-Frame-Options`).
+**`documentation/rfc-library`** — the RFC/BCP/STD/FYI/IEN archive as plain text,
+laid out `rfc/NNNNN-NNNNN/rfcNNNN.txt`, with `indexes/rfc-index.txt` to search
+by title. Complete for what it covers: 9 810 RFC texts, every published RFC that
+has one, verified against the index. The ones this package reasons from:
+**9110** (HTTP semantics), **9111** (caching — §5.4 on `Pragma`, §7.3 on
+`Set-Cookie` and shared caches, both quoted in the parked items), **6797**
+(HSTS), **6265** (cookies), **7034** (`X-Frame-Options`).
 
-**`web_browsers/firefox`** and **`web_browsers/WebKit`** — ground truth for
-*"does a browser actually honour this"*, which principle 5 and every
-deprecation ruling turn on. Two engines only; there is no Chromium checkout,
-so a Chromium claim still needs an external source.
+**It mirrors the published series only — no Internet-Drafts, by design.** A
+scope decision of the mirror, not a defective checkout: `scripts/update.sh`
+rsyncs `rfcs-text-only` and `rfcs-pdf-all` from `rsync://ftp.rfc-editor.org`,
+and that server offers **eight modules, none of which carries drafts** (asked
+directly, 2026-08-17; its `prerelease/` is approved-but-unpublished RFCs, a
+different thing). The consequence that matters here: the `Set-Cookie` prefix
+rules are in no RFC at all, so **6265 is not the authority for the prefixes** —
+do not cite it for one.
 
+Internet-Drafts, when they are here, are under **`mirror/`** — human-maintained,
+gitignored in that repo alongside `pdf/` and `dist/`, and **not an agent's to
+create, sync or tidy** (see the rule at the top of this section; untracked files
+there are expected, not a mess). Read whatever is in it, and if the draft you
+need is absent, say so rather than fetching it. Provenance, recorded once so the
+claim is checkable: drafts come from the IETF, `rsync://rsync.ietf.org`, module
+`internet-drafts` (currently active, 9 356 files / 795 MB, or 3 366 files /
+199 MB text-only) or `id-archive` (active *and* expired, every revision). Not
+from the RFC Editor, and no scrape of `datatracker.ietf.org` is involved — it
+renders the same documents.
+
+Two standing facts about draft coverage, which are about *analysis*, not upkeep:
+
+- **Only the cookie prefixes need a draft at all.** `draft-ietf-httpbis-`
+  `rfc6265bis` and `draft-ietf-httpbis-layered-cookies` — every other header
+  here resolves to a published RFC already on disk.
+- **No IETF mirror closes the real spec gap.** Counting `specifications[]` links
+  in `known-http-header-db` across the ~20 headers this package analyses, the
+  IETF links are all *published RFC* pages, while **9 point at WHATWG**
+  (`html.spec.whatwg.org`, `fetch.spec.whatwg.org`) and **8 at W3C**
+  (`w3c.github.io`, `w3.org`) — CSP, Permissions-Policy, COOP/COEP,
+  Clear-Site-Data, `nosniff`. Those are living standards in neither IETF module,
+  so for them the browser sources remain the on-disk authority.
+
+**`web_browsers/chromium`**, **`web_browsers/firefox`** and
+**`web_browsers/WebKit`** — ground truth for *"does a browser actually honour
+this"*, which principle 5 and every deprecation ruling turn on. **All three
+engines are now readable**, so a support claim no longer has to rest on BCD
+alone; BCD says *whether it shipped*, the source says *what it actually does
+with the value*, and the second question is the one this package reasons about.
+
+- Chromium: nearly everything is under `services/network/public/cpp/` —
+  `content_security_policy/` (`csp_source_list.cc` is the one to read),
+  `cross_origin_opener_policy_parser.cc`,
+  `cross_origin_embedder_policy_parser.cc`, `cross_origin_resource_policy.cc`,
+  `integrity_policy_parser.cc`, `x_frame_options_parser.cc`, and
+  `parsed_headers.cc` as the index of what the network service parses at all.
+  Cookies are `net/cookies/cookie_util.cc` (the prefix rules) and
+  `canonical_cookie.cc`; HSTS is `net/http/transport_security_state.cc`.
+  Feature flags gate a lot of this — `services/network/public/cpp/features.cc`
+  says whether a parsed value is actually live, and
+  `base::FEATURE_ENABLED_BY_DEFAULT` there is what turns "parsed" into
+  "honoured".
+- Two Chromium files are data, not code, and both are assets in their own
+  right: `services/network/public/cpp/permissions_policy/`
+  `permissions_policy_features.json5` is the authoritative registry of the
+  **210** Permissions-Policy features Chromium knows, each with its wire name
+  (`permissions_policy_name: "ch-ua"`) and its `feature_default` — the closed
+  value set `policies.py` otherwise has to hand-maintain. And
+  `net/http/transport_security_state_static.json` is 10.5 MB of **the HSTS
+  preload list itself**, which is what `security/hstspreload`'s packed
+  `hstspreload.bin` is generated from, so a preload claim can now be checked
+  against the source rather than the binary.
 - Firefox: `dom/security/nsCSPParser.cpp`, `dom/security/nsCSPUtils.cpp`,
   `security/manager/ssl/nsSiteSecurityService.cpp` (HSTS),
-  `dom/security/featurepolicy/`, `dom/security/IntegrityPolicy.cpp`, and
-  `modules/libpref/init/StaticPrefList.yaml` for what is behind a pref.
+  `dom/security/featurepolicy/`, `dom/security/IntegrityPolicy.cpp`,
+  `netwerk/cookie/CookiePrefixes.cpp` (102 lines, and the best-commented
+  account of the prefix rules on disk — it cites the RFC section per prefix),
+  and `modules/libpref/init/StaticPrefList.yaml` for what is behind a pref.
 - WebKit: `Source/WebCore/page/csp/ContentSecurityPolicy*.cpp`,
   `Source/WebCore/loader/CrossOriginOpenerPolicy.cpp`,
-  `Source/WebCore/loader/CrossOriginEmbedderPolicy.h`.
-- Both browser-support claims in "Deliberately decided" were re-verified
-  against these checkouts: `security.integrity_policy.stylesheet.enabled` is
-  real (`StaticPrefList.yaml:19276`, beside `security.integrity_policy.enabled`
-  at 19271), and `noopener-allow-popups` is parsed in WebKit
-  (`CrossOriginOpenerPolicy.cpp:237`) and appears nowhere in Firefox. This is
-  the cheap way to recheck them when the shelf life runs out.
+  `Source/WebCore/loader/CrossOriginEmbedderPolicy.h`. **WebKit cannot answer
+  cookie questions.** The only prefix logic in the tree is
+  `Source/WebCore/platform/network/curl/CookieJarDB.cpp:492`, the curl backend
+  used by the non-Apple ports; Safari goes through CFNetwork, which is not open
+  source and not in this checkout. Take Safari cookie behaviour from BCD.
+- Three browser-support claims in "Deliberately decided" were re-verified
+  against these checkouts and all hold:
+  `security.integrity_policy.stylesheet.enabled` is real
+  (`StaticPrefList.yaml:19276`, beside `security.integrity_policy.enabled` at
+  19271); `noopener-allow-popups` is
+  parsed in WebKit (`CrossOriginOpenerPolicy.cpp:237`), parsed in Chromium
+  (`cross_origin_opener_policy_parser.cc:66`) behind a flag that is
+  `FEATURE_ENABLED_BY_DEFAULT` (`features.cc:89`), and appears nowhere in
+  Firefox; and Chromium's `integrity_policy_parser.cc:36` accepts
+  `blocked-destinations=script` and nothing else, pushing anything else onto
+  `parsing_errors`. This is the cheap way to recheck them when the shelf life
+  runs out.
 
 **`security/csp-evaluator`** — the source of the ported CSP checks.
 `checks/security_checks.ts`, `checks/strictcsp_checks.ts` and
@@ -553,7 +720,9 @@ so a Chromium claim still needs an external source.
 **`security/hstspreload`** — the source of the declared `[preload]` extra, so
 the behaviour of the only third-party dependency is readable. One public
 function, `in_hsts_preload(host)`; the list is a packed `hstspreload.bin`
-rebuilt monthly from Chromium's `transport_security_state_static.json`.
+rebuilt monthly from Chromium's `transport_security_state_static.json` — which
+is now on disk too, at `web_browsers/chromium/net/http/`, so the packed list and
+its source can be compared.
 
 **`security/humble`** — rfc-st/humble, the closest peer to this package on disk
 and the one to diff verdicts against. `humble.py` is 5 648 lines, but the part
@@ -620,9 +789,12 @@ only one of the two that records flags, partial implementations and
   then tests `startswith('__Secure')` / `startswith('__Host')`, so both prefix
   branches are unreachable, and it falls back to guessing from `'session' in
   name` / `'csrf' in name` — the guess the parked cache/cookie item refuses to
-  make. Two failure modes to avoid in one 15-line file; the prefixes are
-  case-**sensitive**, which is what makes the lowercasing wrong rather than
-  merely redundant. `burp/burp-samesite-reporter` is 326 lines of Java that
+  make. Two failure modes to avoid in one 15-line file. Note *why* the first one
+  is a bug, because this was recorded wrongly here once: lowercasing the name is
+  not itself the error — browsers match these prefixes case-insensitively (see
+  the parked `Set-Cookie` item) — the error is comparing the lowered name
+  against a mixed-case literal, which can never match. Lower both sides.
+  `burp/burp-samesite-reporter` is 326 lines of Java that
   classifies each cookie as `SameSite` missing / `None` / other and carries its
   reasoning in the issue prose.
 - **`documentation/Open-Cookie-Database`** — 2 264 cookies as CSV and JSON,
@@ -686,7 +858,7 @@ only one of the two that records flags, partial implementations and
 
 ### Everything else — assume it is not interesting
 
-`/home/crapula/ref` holds far more than the whitelist above: ~19 GB of
+`/home/crapula/ref` holds far more than the whitelist above: 35 GB of
 operating-system source, a dozen application servers, seven cookie tools and
 two dozen Burp extensions of which only the eight named above touch a header
 value or a cookie flag. **Nothing outside this section is relevant unless the
@@ -696,8 +868,6 @@ it again is the reason this paragraph exists.
 
 Only the negatives that would otherwise look promising are kept:
 
-- **There is no Chromium checkout.** Firefox and WebKit are the only engines
-  readable here, so a Chromium claim still needs BCD or an external source.
 - **`operating_systems/*`** — nothing about HTTP security headers.
   `busybox/networking/httpd.c` and `Windows-Server-2003/inetsrv/iis` (IIS 6)
   predate every header analysed here; at most they explain where a few
