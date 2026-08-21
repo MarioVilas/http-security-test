@@ -183,6 +183,54 @@ ANALYZER_CASES = [
     ("Access-Control-Allow-Origin", "https://example.test:8443", []),
     ("Access-Control-Allow-Origin", "http://localhost:3000", []),
     ("Access-Control-Allow-Origin", "moz-extension://a1b2c3", []),
+    # Access-Control-Allow-Credentials is compared with the byte string `true`
+    # and nothing else -- Fetch's CORS check step 6, "If credentials is `true`,
+    # then return success". So a value that only looks like it says yes says no,
+    # and the credentialed request the operator meant to allow is blocked.
+    ("Access-Control-Allow-Credentials", "true", []),
+    ("Access-Control-Allow-Credentials", "True", ["acac-ineffective"]),
+    ("Access-Control-Allow-Credentials", "TRUE", ["acac-ineffective"]),
+    # ...but a value that does not mean yes at all is not a mistake: the header
+    # then means exactly what its absence means, which is what the author asked
+    # for. Only a near miss of `true` says the intent was thwarted.
+    ("Access-Control-Allow-Credentials", "false", []),
+    ("Access-Control-Allow-Credentials", "0", []),
+    # Access-Control-Allow-Methods. CONNECT, TRACE and TRACK are Fetch's
+    # forbidden methods, matched case-insensitively -- Chromium
+    # `IsForbiddenMethod` (cors.cc:484, and its unit test asserts `CoNnEcT`),
+    # Firefox FetchUtil.cpp:38. No browser will ever send one, so allowing one
+    # grants nothing at all.
+    ("Access-Control-Allow-Methods", "GET, POST", []),
+    ("Access-Control-Allow-Methods", "*", []),
+    ("Access-Control-Allow-Methods", "GET, PUT, DELETE, PATCH", []),
+    ("Access-Control-Allow-Methods", "GET, TRACE", ["acam-forbidden-method"]),
+    ("Access-Control-Allow-Methods", "CONNECT", ["acam-forbidden-method"]),
+    ("Access-Control-Allow-Methods", "track", ["acam-forbidden-method"]),
+    ("Access-Control-Allow-Methods", "GET, Trace, connect", ["acam-forbidden-method"]),
+    # Access-Control-Max-Age is delta-seconds. A value that is not an integer is
+    # honoured by neither engine: Chromium falls back to its five-second default
+    # (`preflight_result.cc:61`), Firefox declines to cache the preflight at all
+    # (`nsCORSListenerProxy.cpp:1399`). Either way the interval asked for is not
+    # the interval used.
+    ("Access-Control-Max-Age", "600", []),
+    ("Access-Control-Max-Age", "0", []),
+    # -1 is not a mistake. Both engines read it as "do not cache this preflight"
+    # -- Chromium returns an empty TimeDelta with the comment "Negative value
+    # doesn't make sense - use 0 instead, to represent that the entry cannot be
+    # cached", Firefox stops at the sign and caches nothing. It is a deliberate
+    # configuration and reporting it would contradict a working one.
+    ("Access-Control-Max-Age", "-1", []),
+    # nor is an excessive value: it is silently clamped, to 7200 in Chromium and
+    # 86400 in Firefox, so the operator loses nothing they were ever going to get
+    ("Access-Control-Max-Age", "31536000", []),
+    ("Access-Control-Max-Age", "forever", ["acma-invalid"]),
+    ("Access-Control-Max-Age", "600s", ["acma-invalid"]),
+    ("Access-Control-Max-Age", "", ["acma-invalid"]),
+    # Python reads Arabic-Indic digits as a number and both engines do not:
+    # int("٦٠٠") is 600, while Chromium's StringToInt64 rejects it and
+    # Firefox stops at the first character outside 0-9. The analyser has to
+    # answer as the browsers do, so this is invalid however well it parses here.
+    ("Access-Control-Max-Age", "٦٠٠", ["acma-invalid"]),
     # Content-Type. Only the charset parameter is decidable from a header that
     # describes a body nobody here sees, and only for markup a browser parses.
     ("Content-Type", "text/html; charset=UTF-8", []),
@@ -836,6 +884,7 @@ def _emitted():
         {},
         BOTH,
         WILDCARD_WITH_CREDENTIALS,
+        CREDENTIALED_WILDCARDS,
         REPORT_ONLY_ONLY,
         REPORTS_NOWHERE,
         CSP_REPORTS_NOWHERE,
@@ -871,6 +920,8 @@ def _every_code_headers_can_emit():
     # ...and fp-conflicts and acao-credentials-wildcard each need a pair
     codes |= {f.code for f in headers.analyze_all(BOTH)}
     codes |= {f.code for f in headers.analyze_all(WILDCARD_WITH_CREDENTIALS)}
+    # ...as do the three wildcards that a credentialed response makes literal
+    codes |= {f.code for f in headers.analyze_all(CREDENTIALED_WILDCARDS)}
     codes |= {f.code for f in headers.analyze_all(REPORT_ONLY_ONLY)}
     # ...and ip-endpoints-undefined needs a policy naming a group beside a
     # Reporting-Endpoints header that does not define it
@@ -1157,7 +1208,7 @@ def test_severity_values_match_the_documented_policy():
     # The completeness tests above check only which codes are rated. These
     # anchor what they are rated, so a flipped value cannot land silently.
     counts = collections.Counter(headers.FINDING_SEVERITY.values())
-    assert counts == {"error": 35, "warning": 26, "note": 35}
+    assert counts == {"error": 39, "warning": 26, "note": 37}
     # An explicitly-defaulted header is rated exactly as its absence is, so
     # neither spelling of the same posture reads better than the other
     assert (
@@ -1268,12 +1319,131 @@ def test_the_refused_pairing_subsumes_the_plain_wildcard_note():
     assert "acao-wildcard" not in acao_codes(WILDCARD_WITH_CREDENTIALS)
 
 
+def test_the_refused_pairing_needs_credentials_that_browsers_read_as_yes():
+    # `True` is not the byte string Fetch compares against, so no credentialed
+    # request ever reaches the wildcard: the response shares itself with every
+    # origin exactly as an ordinary `*` does, and that is what to report.
+    present = {
+        "access-control-allow-origin": "*",
+        "access-control-allow-credentials": "True",
+    }
+    assert cors_codes(present) == ["acac-ineffective", "acao-wildcard"]
+
+
 def test_credentials_without_a_wildcard_is_an_ordinary_configuration():
     present = {
         "access-control-allow-origin": "https://a.test",
         "access-control-allow-credentials": "true",
     }
     assert acao_codes(present) == []
+
+
+def test_a_repeated_allow_origin_is_the_list_browsers_reject():
+    # Fetch's CORS check *gets* the header, and getting a repeated header joins
+    # its values with `, `. So two individually valid origins arrive at the
+    # byte-comparison as one string that is not any origin, and no cross-origin
+    # read succeeds -- the same defect as a comma written by hand.
+    present = headers.parse_headers(
+        [
+            ("Access-Control-Allow-Origin", "https://a.test"),
+            ("Access-Control-Allow-Origin", "https://b.test"),
+        ]
+    )
+    assert acao_codes(present) == ["acao-multiple-origins"]
+
+
+def test_a_header_repeated_with_one_value_is_still_that_one_value():
+    # ...and the joined string is `https://a.test, https://a.test`, which is not
+    # a serialized origin either. Both engines would reject it, so this is the
+    # same finding and not a false positive on a benignly duplicated header.
+    present = headers.parse_headers(
+        [
+            ("Access-Control-Allow-Origin", "https://a.test"),
+            ("Access-Control-Allow-Origin", "https://a.test"),
+        ]
+    )
+    assert acao_codes(present) == ["acao-multiple-origins"]
+
+
+# The wildcard is a literal token whenever the request's credentials mode is
+# `include`: Fetch's CORS-preflight fetch tests `methods does not contain *`
+# only after `request's credentials mode is include` has already failed, and
+# does the same for header names. So each of these three grants exactly nothing
+# on the credentialed requests the response has asked browsers to permit.
+
+CREDENTIALED = {
+    "access-control-allow-origin": "https://a.test",
+    "access-control-allow-credentials": "true",
+}
+
+
+# all three at once, for the corpus that proves every code is reachable
+CREDENTIALED_WILDCARDS = CREDENTIALED | {
+    "access-control-allow-methods": "*",
+    "access-control-allow-headers": "*",
+    "access-control-expose-headers": "*",
+}
+
+
+def cors_codes(present):
+    return sorted(
+        f.code
+        for f in headers.analyze_all(present)
+        if f.code[:4] in ("acao", "acac", "acam", "acah", "aceh", "acma")
+    )
+
+
+def test_allow_methods_wildcard_with_credentials_grants_no_method():
+    present = CREDENTIALED | {"access-control-allow-methods": "*"}
+    assert cors_codes(present) == ["acam-credentials-wildcard"]
+
+
+def test_allow_headers_wildcard_with_credentials_grants_no_header():
+    present = CREDENTIALED | {"access-control-allow-headers": "*"}
+    assert cors_codes(present) == ["acah-credentials-wildcard"]
+
+
+def test_expose_headers_wildcard_with_credentials_exposes_nothing():
+    present = CREDENTIALED | {"access-control-expose-headers": "*"}
+    assert cors_codes(present) == ["aceh-credentials-wildcard"]
+
+
+def test_a_fully_specified_credentialed_response_raises_nothing():
+    # The ordinary shape of a working credentialed endpoint: one origin, and
+    # every method and header named rather than wildcarded -- Authorization
+    # included, which is the one name a * could never have covered anyway.
+    # This is the configuration the whole family exists to let someone write,
+    # and a tool that finds fault with it is worse than no tool.
+    present = CREDENTIALED | {
+        "access-control-allow-methods": "GET, POST, OPTIONS",
+        "access-control-allow-headers": "Content-Type, Authorization",
+        "access-control-expose-headers": "X-Total-Count",
+        "access-control-max-age": "600",
+    }
+    assert cors_codes(present) == []
+
+
+def test_the_same_wildcards_are_an_ordinary_configuration_without_credentials():
+    present = {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "*",
+        "access-control-allow-headers": "*",
+        "access-control-expose-headers": "*",
+    }
+    # the plain wildcard note stands; nothing here is contradicted
+    assert cors_codes(present) == ["acao-wildcard"]
+
+
+def test_credentials_that_never_take_effect_contradict_no_wildcard():
+    # `True` is not `true`, so the credentials never apply and the wildcards
+    # mean what they ordinarily mean. Reporting them as refused would be wrong
+    # twice over: the pairing browsers refuse is not the one on the wire.
+    present = {
+        "access-control-allow-origin": "https://a.test",
+        "access-control-allow-credentials": "True",
+        "access-control-allow-methods": "*",
+    }
+    assert cors_codes(present) == ["acac-ineffective"]
 
 
 # ---------------------------------------------------------------------------
@@ -1669,6 +1839,54 @@ def test_reporting_endpoints_is_never_reported_missing():
     inventory = headers.inventory({})
     assert "Reporting-Endpoints" not in inventory["missing"]
     assert not [f for f in headers.analyze_all({}) if f.header == "Reporting-Endpoints"]
+
+
+# ---------------------------------------------------------------------------
+# The CORS family in the inventory
+# ---------------------------------------------------------------------------
+# Same shape as the reporting pair, and for the same reason: a response that
+# shares nothing cross-origin is the ordinary state of the web, so an absent
+# Access-Control-Allow-Origin is not a gap. Sharing is nonetheless the whole
+# subject of these headers, so what a response does say has to be visible.
+
+CORS_RESPONSE = {
+    "access-control-allow-origin": "https://a.test",
+    "access-control-allow-credentials": "true",
+    "access-control-allow-methods": "GET, POST",
+    "access-control-allow-headers": "content-type",
+    "access-control-expose-headers": "x-total-count",
+    "access-control-max-age": "600",
+}
+
+
+def test_the_cors_family_is_inventoried_when_present():
+    inventory = headers.inventory(CORS_RESPONSE)
+    assert inventory["security"] == {
+        "Access-Control-Allow-Origin": "https://a.test",
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Allow-Methods": "GET, POST",
+        "Access-Control-Allow-Headers": "content-type",
+        "Access-Control-Expose-Headers": "x-total-count",
+        "Access-Control-Max-Age": "600",
+    }
+
+
+def test_no_cors_header_is_ever_reported_missing():
+    missing = headers.inventory({})["missing"]
+    assert not [name for name in missing if name.startswith("Access-Control-")]
+
+
+def test_a_response_sharing_nothing_raises_no_cors_finding():
+    assert not [
+        f for f in headers.analyze_all({}) if f.header.startswith("Access-Control-")
+    ]
+
+
+def test_the_cors_inventory_does_not_judge_what_it_lists():
+    # principle 2: the inventory reports the value, the finding judges it, and
+    # a wildcard shared with credentials is still inventoried verbatim
+    inventory = headers.inventory(WILDCARD_WITH_CREDENTIALS)
+    assert inventory["security"]["Access-Control-Allow-Origin"] == "*"
 
 
 def test_the_whole_loopback_range_is_left_alone():

@@ -58,6 +58,10 @@ def identity(finding):
 # A warning means it protects, but a hardening directive is missing. A note is
 # a fact with no defect.
 FINDING_SEVERITY = {
+    "acac-ineffective": "error",
+    "acah-credentials-wildcard": "error",
+    "acam-credentials-wildcard": "error",
+    "aceh-credentials-wildcard": "error",
     "acao-credentials-wildcard": "error",
     "acao-invalid-origin": "error",
     "acao-multiple-origins": "error",
@@ -151,6 +155,12 @@ FINDING_SEVERITY = {
     "p3p-deprecated": "note",
     "xdo-deprecated": "note",
     "acao-wildcard": "note",
+    # Neither of these withholds anything a browser would otherwise do: a
+    # forbidden method is one no browser sends however it is answered, and a
+    # max-age that will not parse costs a preflight round trip, not a
+    # protection. Both are facts about a configuration that does nothing.
+    "acam-forbidden-method": "note",
+    "acma-invalid": "note",
     "coep-ro-unenforced": "note",
     "coop-ro-unenforced": "note",
     "csp-ro-unenforced": "note",

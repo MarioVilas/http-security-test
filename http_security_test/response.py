@@ -32,7 +32,10 @@ from .findings import Finding, identity
 from .hsts import _analyze_hsts, _analyze_preload
 from .isolation import (
     COOP_VALUES,
+    _analyze_acac,
+    _analyze_acam,
     _analyze_acao,
+    _analyze_acma,
     _analyze_coep,
     _analyze_coop,
     _analyze_corp,
@@ -104,6 +107,23 @@ SECURITY_HEADERS = (
 # A response that configures no reporting is not thereby defective, so an
 # `re-missing` finding would fire on very nearly every site analysed.
 REPORTING_HEADERS = ("Report-To", "Reporting-Endpoints")
+
+
+# The CORS response headers, inventoried on the same terms as the reporting pair
+# and for the same reason: a response that shares nothing across origins is the
+# ordinary state of the web, not a gap, so none of these is ever reported
+# missing and none belongs in SECURITY_HEADERS. Sharing is nonetheless the
+# entire subject of these headers, so what a response does say has to be
+# visible -- and until now Access-Control-Allow-Origin appeared in no inventory
+# at all, however permissive its value.
+CORS_HEADERS = (
+    "Access-Control-Allow-Origin",
+    "Access-Control-Allow-Credentials",
+    "Access-Control-Allow-Methods",
+    "Access-Control-Allow-Headers",
+    "Access-Control-Expose-Headers",
+    "Access-Control-Max-Age",
+)
 
 
 # Headers a response may legally repeat, because repetition is defined for them
@@ -530,6 +550,9 @@ _ANALYZERS = {
     "cross-origin-opener-policy": _analyze_coop,
     "cross-origin-resource-policy": _analyze_corp,
     "access-control-allow-origin": _analyze_acao,
+    "access-control-allow-credentials": _analyze_acac,
+    "access-control-allow-methods": _analyze_acam,
+    "access-control-max-age": _analyze_acma,
     "expect-ct": _analyze_ect,
     "feature-policy": _analyze_fp,
     "integrity-policy": _analyze_ip,
@@ -1104,7 +1127,9 @@ def inventory(present):
     """
     present = _normalize(present)
     return {
-        "security": _filter_headers(present, SECURITY_HEADERS + REPORTING_HEADERS),
+        "security": _filter_headers(
+            present, SECURITY_HEADERS + REPORTING_HEADERS + CORS_HEADERS
+        ),
         "missing": [name for name in SECURITY_HEADERS if name.lower() not in present],
         "deprecated": _filter_headers(present, DEPRECATED_HEADERS),
         "information": _filter_headers(present, INFORMATION_HEADERS),

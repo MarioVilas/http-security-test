@@ -1,3 +1,11 @@
+acac-ineffective	Access-Control-Allow-Credentials	present as TRUE, which browsers compare against the byte string true and so read as a refusal, leaving every credentialed cross-origin request blocked; expected true in lower case
+acac-ineffective	Access-Control-Allow-Credentials	present as True, which browsers compare against the byte string true and so read as a refusal, leaving every credentialed cross-origin request blocked; expected true in lower case
+acah-credentials-wildcard	Access-Control-Allow-Headers	present as * alongside Access-Control-Allow-Credentials: true, and a credentialed request reads the * as a header literally named *, so no header is allowed and the preflight fails; expected each header listed
+acam-credentials-wildcard	Access-Control-Allow-Methods	present as * alongside Access-Control-Allow-Credentials: true, and a credentialed request reads the * as a method literally named *, so no method is allowed and the preflight fails; expected each method listed
+acam-forbidden-method	Access-Control-Allow-Methods	present and allows CONNECT, TRACE, which browsers refuse to send whatever a preflight answers, so allowing them permits nothing
+acam-forbidden-method	Access-Control-Allow-Methods	present and allows CONNECT, which browsers refuse to send whatever a preflight answers, so allowing them permits nothing
+acam-forbidden-method	Access-Control-Allow-Methods	present and allows TRACE, which browsers refuse to send whatever a preflight answers, so allowing them permits nothing
+acam-forbidden-method	Access-Control-Allow-Methods	present and allows TRACK, which browsers refuse to send whatever a preflight answers, so allowing them permits nothing
 acao-credentials-wildcard	Access-Control-Allow-Origin	present as * alongside Access-Control-Allow-Credentials: true, a combination browsers refuse outright, so every credentialed cross-origin request fails
 acao-invalid-origin	Access-Control-Allow-Origin	present but *.example.test is not a serialized origin, which browsers compare byte for byte, so it matches nothing and no cross-origin read succeeds
 acao-invalid-origin	Access-Control-Allow-Origin	present but HTTPS://example.test is not a serialized origin, which browsers compare byte for byte, so it matches nothing and no cross-origin read succeeds
@@ -13,6 +21,11 @@ acao-multiple-origins	Access-Control-Allow-Origin	present but lists more than on
 acao-multiple-origins	Access-Control-Allow-Origin	present but lists more than one origin (https://a.test, https://b.test), which the header does not allow, so browsers reject it and no cross-origin read succeeds
 acao-null	Access-Control-Allow-Origin	present but set to null, which any sandboxed iframe or data: URL can send as its Origin, so any page can read the response
 acao-wildcard	Access-Control-Allow-Origin	present and set to *, so any origin may read the response; that is deliberate for public assets and a leak for anything user-specific
+aceh-credentials-wildcard	Access-Control-Expose-Headers	present as * alongside Access-Control-Allow-Credentials: true, and a credentialed request reads the * as a header literally named *, so the script sees only the safelisted response headers; expected each header listed
+acma-invalid	Access-Control-Max-Age	present but its value () is not a number of seconds, so the preflight cache interval asked for is not the one used: Chromium falls back to five seconds and Firefox caches nothing
+acma-invalid	Access-Control-Max-Age	present but its value (600s) is not a number of seconds, so the preflight cache interval asked for is not the one used: Chromium falls back to five seconds and Firefox caches nothing
+acma-invalid	Access-Control-Max-Age	present but its value (forever) is not a number of seconds, so the preflight cache interval asked for is not the one used: Chromium falls back to five seconds and Firefox caches nothing
+acma-invalid	Access-Control-Max-Age	present but its value (٦٠٠) is not a number of seconds, so the preflight cache interval asked for is not the one used: Chromium falls back to five seconds and Firefox caches nothing
 coep-invalid	Cross-Origin-Embedder-Policy	present but has an unrecognised value (nonsense); expected unsafe-none, require-corp or credentialless
 coep-invalid	Cross-Origin-Embedder-Policy	present but has an unrecognised value (require-corps); expected unsafe-none, require-corp or credentialless
 coep-missing	Cross-Origin-Embedder-Policy	missing

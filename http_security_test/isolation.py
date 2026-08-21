@@ -19,12 +19,14 @@
 """Who may reach into this document, and what it may embed.
 
 COOP, COEP and CORP work as a set: cross-origin isolation needs two of them
-agreeing, so each is judged in the light of the others. CORS lives here too --
-Access-Control-Allow-Origin answers the same question from the other side.
+agreeing, so each is judged in the light of the others. The CORS family lives
+here too -- Access-Control-Allow-Origin and its siblings answer the same
+question from the other side, and they read each other the same way: what a
+wildcard means depends on whether the response asked for credentials.
 """
 
 from .findings import Finding
-from .message import _sole_value
+from .message import _lookup_all, _sole_value
 
 # COOP values that sever the opener relationship. noopener-allow-popups cuts the
 # document's own opener while still letting it open popups that keep theirs,
@@ -40,6 +42,25 @@ COEP_VALUES = frozenset(["unsafe-none", "require-corp", "credentialless"])
 
 
 CORP_VALUES = frozenset(["same-site", "same-origin", "cross-origin"])
+
+
+# Fetch's forbidden methods, which a browser refuses to send however a response
+# answers a preflight. Matched case-insensitively, as both engines do: Chromium
+# `IsForbiddenMethod` (services/network/public/cpp/cors/cors.cc:484), whose unit
+# test pins `CoNnEcT`, and Firefox `FetchUtil.cpp:38`.
+FORBIDDEN_METHODS = frozenset(["connect", "trace", "track"])
+
+
+# The CORS response headers whose `*` stops being a wildcard as soon as the
+# request carries credentials. Fetch's CORS-preflight fetch reaches the
+# `contains *` test only after `request's credentials mode is include` has
+# already failed, so on the credentialed requests the response asked for, each
+# of these grants precisely nothing.
+CREDENTIALS_WILDCARD_CODES = (
+    ("Access-Control-Allow-Methods", "acam-credentials-wildcard"),
+    ("Access-Control-Allow-Headers", "acah-credentials-wildcard"),
+    ("Access-Control-Expose-Headers", "aceh-credentials-wildcard"),
+)
 
 
 def _bare_item(value):
@@ -144,6 +165,75 @@ def _analyze_acao(value):
     return []
 
 
+def _analyze_acac(value):
+    """Whether the credentials this header grants are the ones browsers read.
+
+    Fetch's CORS check ends `If credentials is \\`true\\`, then return success`,
+    against the byte string and nothing else, so `True` denies exactly what it
+    was written to allow.
+
+    A value that does not mean yes in any casing is left alone. `false` behaves
+    as the absent header does, which is what whoever wrote it asked for -- only
+    a near miss of `true` says an intention was thwarted.
+    """
+    credentials = value.strip()
+    if credentials != "true" and credentials.lower() == "true":
+        return [
+            Finding(
+                "Access-Control-Allow-Credentials",
+                "acac-ineffective",
+                {"value": credentials},
+            )
+        ]
+    return []
+
+
+def _analyze_acam(value):
+    """Methods allowed here that no browser will ever ask for.
+
+    Reported in the canonical upper case whatever the response wrote, because
+    the match is case-insensitive in both engines: `trace` and `TRACE` are one
+    fact about the configuration, not two.
+    """
+    methods = sorted(
+        {
+            method.strip().upper()
+            for method in value.split(",")
+            if method.strip().lower() in FORBIDDEN_METHODS
+        }
+    )
+    if not methods:
+        return []
+    return [
+        Finding(
+            "Access-Control-Allow-Methods",
+            "acam-forbidden-method",
+            {"methods": methods},
+        )
+    ]
+
+
+def _analyze_acma(value):
+    """Whether the preflight cache interval is one a browser can read.
+
+    delta-seconds, and neither engine repairs anything else: Chromium falls back
+    to its five-second default when the value will not parse
+    (`preflight_result.cc:61`), Firefox stops at the first non-digit and caches
+    the preflight not at all (`nsCORSListenerProxy.cpp:1399`).
+
+    A negative value is not a defect. Both read it as "do not cache this
+    preflight" -- Chromium says so in a comment -- so it is a configuration, and
+    an oversized one is silently clamped rather than refused.
+    """
+    seconds = value.strip()
+    digits = seconds.removeprefix("-")
+    # isdigit() alone accepts superscripts and non-ASCII digit forms that
+    # Python's own int() reads as numbers and no engine's parser does.
+    if digits.isascii() and digits.isdigit():
+        return []
+    return [Finding("Access-Control-Max-Age", "acma-invalid", {"value": seconds})]
+
+
 def _is_serialized_origin(value):
     """Whether a browser could ever match this against a request's origin.
 
@@ -209,20 +299,55 @@ def _analyze_isolation(present):
     return []
 
 
+def _grants_credentials(present):
+    """Whether the response says credentialed cross-origin requests are wanted.
+
+    The byte string `true` and nothing else, because that is the comparison the
+    CORS check makes. Any other value leaves every credentialed request failing,
+    which is the absent header's behaviour, so the response has asked for
+    nothing and no pairing with it can be contradicted.
+
+    Note this is about the *response's* intent. Whether credentials are actually
+    in play is the request's `credentials mode`, which nothing here can see --
+    but a response sending this header is a response that meant them to be.
+    """
+    acac = _sole_value(present, "Access-Control-Allow-Credentials")
+    return acac is not None and acac.strip() == "true"
+
+
 def _shares_credentials_with_everyone(present):
     """Whether the response asks for the one CORS pairing browsers refuse."""
     acao = _sole_value(present, "Access-Control-Allow-Origin")
-    acac = _sole_value(present, "Access-Control-Allow-Credentials")
-    return (
-        acao is not None
-        and acac is not None
-        and acao.strip() == "*"
-        and acac.strip().lower() == "true"
-    )
+    return acao is not None and acao.strip() == "*" and _grants_credentials(present)
 
 
 def _analyze_cors(present):
-    """Findings about the CORS pair that neither header shows alone."""
-    if not _shares_credentials_with_everyone(present):
-        return []
-    return [Finding("Access-Control-Allow-Origin", "acao-credentials-wildcard")]
+    """Findings about the CORS headers that none of them shows alone."""
+    findings = []
+
+    # A repeated header is one value to a browser: the CORS check *gets*
+    # Access-Control-Allow-Origin, and getting joins repeats with `, `. So two
+    # origins that are each valid arrive at the byte comparison as one string
+    # that is no origin at all -- including two copies of the same one.
+    origins = _lookup_all(present, "Access-Control-Allow-Origin")
+    if len(origins) > 1:
+        findings.append(
+            Finding(
+                "Access-Control-Allow-Origin",
+                "acao-multiple-origins",
+                {"value": ", ".join(origin.strip() for origin in origins)},
+            )
+        )
+
+    if not _grants_credentials(present):
+        return findings
+
+    if _shares_credentials_with_everyone(present):
+        findings.append(
+            Finding("Access-Control-Allow-Origin", "acao-credentials-wildcard")
+        )
+    for name, code in CREDENTIALS_WILDCARD_CODES:
+        value = _sole_value(present, name)
+        if value is not None and value.strip() == "*":
+            findings.append(Finding(name, code))
+    return findings

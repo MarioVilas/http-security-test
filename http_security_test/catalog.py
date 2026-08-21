@@ -214,6 +214,36 @@ MESSAGES = {
         "combination browsers refuse outright, so every credentialed "
         "cross-origin request fails"
     ),
+    "acac-ineffective": (
+        "present as {value}, which browsers compare against the byte string "
+        "true and so read as a refusal, leaving every credentialed "
+        "cross-origin request blocked; expected true in lower case"
+    ),
+    "acam-credentials-wildcard": (
+        "present as * alongside Access-Control-Allow-Credentials: true, and a "
+        "credentialed request reads the * as a method literally named *, so no "
+        "method is allowed and the preflight fails; expected each method listed"
+    ),
+    "acah-credentials-wildcard": (
+        "present as * alongside Access-Control-Allow-Credentials: true, and a "
+        "credentialed request reads the * as a header literally named *, so no "
+        "header is allowed and the preflight fails; expected each header listed"
+    ),
+    "aceh-credentials-wildcard": (
+        "present as * alongside Access-Control-Allow-Credentials: true, and a "
+        "credentialed request reads the * as a header literally named *, so the "
+        "script sees only the safelisted response headers; expected each "
+        "header listed"
+    ),
+    "acam-forbidden-method": (
+        "present and allows {methods}, which browsers refuse to send whatever a "
+        "preflight answers, so allowing them permits nothing"
+    ),
+    "acma-invalid": (
+        "present but its value ({value}) is not a number of seconds, so the "
+        "preflight cache interval asked for is not the one used: Chromium falls "
+        "back to five seconds and Firefox caches nothing"
+    ),
     # -- Permissions-Policy and Feature-Policy ------------------------------
     "pp-legacy-syntax": (
         "present but written in the older Feature-Policy syntax ({value}), "
