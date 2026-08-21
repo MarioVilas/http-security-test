@@ -85,7 +85,12 @@ These were expensive to arrive at. Do not quietly reverse them.
    project exists because the tool it forked called `default-src 'self'` unsafe by
    substring match. Two Criticals found in review were the same bug in new
    clothes (`require-corp; report-to="…"` read as invalid; the nonce +
-   `'unsafe-inline'` idiom flagged as XSS). Assume the next one is too.
+   `'unsafe-inline'` idiom flagged as XSS). Assume the next one is too. This is
+   not an amateur failure mode: PortSwigger shipped the same bug and then
+   **archived** it — `documentation/BChecks`
+   `archived/Content-Security-Policy.bcheck` decides everything by substring
+   containment and carries a comment recording a false positive it had already
+   had to patch out. See that entry in the reference section.
 5. **Only an effective header earns a suppression.** An `X-Frame-Options`
    browsers ignore protects nothing, and neither does `frame-ancestors *`.
 6. **What a non-enforcing header permits decides nothing.** Report-only content
@@ -197,16 +202,21 @@ Decisions inside that shape, each of which had an alternative:
   key. `message` can be dropped entirely with `message=False`.
 - **`inventory()` takes no `secure`.** Principle 2: nothing is withheld from an
   inventory. HSTS is missing on a plaintext response and the inventory says so.
-- **`security` and `missing` are two halves of one question, with one
-  exception.** `REPORTING_HEADERS` (`Report-To`, `Reporting-Endpoints`) is
-  inventoried under `security` when present and is **never** reported absent,
-  because a response that configures no reporting is the ordinary state of the
-  web rather than a gap. This is why they are not in `SECURITY_HEADERS`: that
+- **`security` and `missing` are two halves of one question, with two
+  exceptions.** `REPORTING_HEADERS` (`Report-To`, `Reporting-Endpoints`) and
+  `CORS_HEADERS` (the six response-side `Access-Control-*`) are inventoried
+  under `security` when present and are **never** reported absent, because a
+  response that configures no reporting — or shares nothing across origins — is
+  the ordinary state of the web rather than a gap. This is why they are not in
+  `SECURITY_HEADERS`: that
   tuple is read three times — for `security`, for `missing`, and by
   `_report_missing()` — and only the first is wanted here. Adding a header
   there to get it inventoried mints an `<initials>-missing` code that fires on
   nearly every site; the bijection tests catch it, but the design should not
-  need saving by them.
+  need saving by them. The CORS table was added on 2026-08-21 and closed a
+  plain oversight: `Access-Control-Allow-Origin` had findings but appeared in
+  no inventory at all, so a response sharing itself with credentials to an
+  arbitrary origin showed five empty tables.
 - **Absent beats empty for passthrough.** No blob, no `raw` key; nothing known
   about the request, no `request` key. The rule that reconciles this with `data`
   always being `{}`: content this package *derived* is always present, content
@@ -274,11 +284,53 @@ suppression applies.
   anchor edited earlier in the session no-ops without complaint. Assert the anchor
   exists and is unique before replacing.
 
-## Human's preferences
+## Human's preferences and standing rules
 
-- **Never commit.** The human owns the git workflow entirely — no `git add`,
-  `commit`, `stash`, or anything that changes git state. An agent ran `git stash`
-  once and flattened their staged changes.
+The first two are not preferences. They are data-loss rules, and both have been
+broken by an agent that had read the section and filed it under taste.
+
+- **Never destroy uncommitted work; never write to git.** The human owns the git
+  workflow entirely. Two families of command, and the second is the trap:
+  - **Writing git state:** `add`, `commit`, `stash`, `push`, `merge`, `rebase`,
+    `tag`, `branch`, `worktree add`. An agent ran `git stash` once and flattened
+    the human's staged changes.
+  - **Discarding working-tree content:** `checkout -- <path>`, `restore`,
+    `reset --hard`, `clean`. **These change no git state at all** — no ref
+    moves, no index entry changes, nothing enters the object database — which is
+    exactly why the older wording, "anything that changes git state", did not
+    stop an agent running `git checkout -- <file>` inside a mutation-test
+    harness on 2026-08-21 and reverting its own uncommitted work in two files.
+    Protect the *work*, not the *state*: git is only one route to losing it.
+
+  **Assume other agents are editing this tree right now.** Sessions run in
+  parallel against one working tree — on the day above, `ListAgents` showed two
+  other live sessions on this repo and `git worktree list` showed a single
+  checkout, so the file the harness reverted could as easily have been someone
+  else's. There is no way to tell whose an uncommitted edit is from inside a
+  session, and no way to ask before the command lands. The recovery odds are not
+  symmetric either: `git stash` at least leaves something in `git stash list`,
+  while `git checkout -- <path>` over never-staged changes is **unrecoverable**,
+  because that content never entered the object database and there is no blob to
+  recover.
+
+  **Reading git is fine, and the practices above require it:** `git show`,
+  `git log`, `git diff`, `git status` and `git archive` write nothing, and the
+  behavioural-equivalence check depends on them.
+
+  **To restore a file broken on purpose** — mutation testing asks for exactly
+  this, so the need is real and the doc used to leave it unanswered — back the
+  file up outside the repo and copy it back:
+
+  ```sh
+  cp module.py "$SCRATCH/"      # ...mutate, run the suite...
+  cp "$SCRATCH/module.py" module.py
+  ```
+
+  Reaching for git to undo your own edit is the mistake. The backup is one line
+  and it cannot reach anyone else's work. A `PreToolUse` hook in
+  `.claude/settings.json` blocks the discarding commands outright, because a
+  rule that lives only in prose is read by exactly the agents that were going
+  to follow it anyway.
 - **Never maintain `/home/crapula/ref`.** The human has their own tooling for
   that whole tree — no syncing, fetching, updating, pruning or cleanup, and no
   state-changing git command in any checkout under it. Read it; that is all. The
@@ -339,6 +391,42 @@ suppression applies.
   `http://localhost`. `_delivers()` therefore fires only on what *both* reject.
   If Chromium relaxes toward the spec the predicate can widen; the reverse is
   not on the cards.
+- **Origin reflection cannot be detected from one exchange, and this is the
+  fact the passive CORS work turns on.** Settled 2026-08-21. A server whose
+  allowlist is exactly `{https://app.example.com}`, answering a request from
+  that origin, emits byte-for-byte what a reflect-anything server emits.
+  Nothing in a response distinguishes a correct allowlist from a broken one, so
+  any check that calls an echoed origin "reflection" is principle 4 in new
+  clothes. What closes the gap is **one bit the caller holds and the response
+  does not**: whether the request's `Origin` was one the caller forged.
+  `burp/Additional_CORS_Checks` works exactly this way — `CorsHelper.kt:62`
+  sends nine forged origins (arbitrary, `http://` downgrade, `null`, prefix,
+  suffix, subdomain, substring, underscore, unescaped-dot) and
+  `CorsIssue.kt:84` decides severity purely on *did my origin come back* ×
+  *was `ACAC: true` set*. When request analysis lands, take the bit as an
+  argument; do not try to infer it from `host`, because partner APIs and CDNs
+  legitimately allowlist unrelated origins.
+- **Not analyzed: `Vary: Origin`.** Decided 2026-08-21, against MDN's advice
+  and against humble, which flags it — so this is a deliberate divergence from
+  peers rather than an omission. The cache-poisoning story does not survive
+  being worked through: a shared cache handing origin A's
+  `ACAO: https://a.example` to origin B only makes B's CORS check fail, and the
+  reverse direction fails too, so it is closed in both. The exploitable version
+  needs the response *content* to differ per origin, which no header can say —
+  the same wall the parked cache/cookie item hit. Note also that `Vary` appears
+  nowhere in Fetch: this is an RFC 9111 §4.1 cache-key question, not a
+  browser-CORS one, so a finding here would be about correctness, not
+  protection. Re-propose only with a concrete attack that does not need
+  origin-varying content.
+- **Not analyzed: `Access-Control-Allow-Private-Network`** — no MDN BCD entry,
+  so by the same reasoning as the CSPEE ruling its prevalence cannot be
+  measured and its support cannot be checked. Reopen if BCD gains one.
+- **`ACAH: *` not covering `Authorization` is an interop bug, not a security
+  one.** Fetch makes `Authorization` a CORS non-wildcard request-header name,
+  but BCD's `Access-Control-Allow-Headers.authorization_not_covered_by_wildcard`
+  is Firefox 115 / Chrome `false` / Safari `false` — only Firefox implements
+  it. A finding here would say "your request fails in one engine", which is not
+  what this package rates. Left alone deliberately.
 - **Not analyzed:** `Document-Policy` (no closed value set, no delegation axis, no
   concrete configuration points of its own); `X-Content-Security-Policy` /
   `X-WebKit-CSP` contents (no browser reads them, so content decides nothing).
@@ -851,7 +939,7 @@ sense `catalog.py` is:
 
 - `additional/insecure.txt` — **158 defect names over 93 distinct headers**,
   each written `Header: Defect` (`Access-Control-Allow-Origin: Unsafe Values`,
-  `Cache-Control: No Valid Directives`). This package has 96 codes over far
+  `Cache-Control: No Valid Directives`). This package has 102 codes over far
   fewer headers, so that file is a ready-made gap list. Read it for candidates,
   not as a specification, and rate anything taken from it by principle 3.
 - `additional/missing.txt` — the 14 headers humble reports as absent, against
@@ -868,6 +956,98 @@ sense `catalog.py` is:
 
 MIT-licensed, which changes nothing here: the read-only rule above is about
 scope, not licence.
+
+**`security/cryptolyzer`** — the closest *architectural* cousin on disk, and
+easy to miss because its README sells it as a TLS/SSH/DNSSEC analyzer. Surveyed
+2026-08-21. `docs/features.rst:250-281` lists an HTTP header feature set
+overlapping this package's almost exactly — CSP and CSP-Report-Only, HSTS, XFO,
+XCTO, X-XSS-Protection, Referrer-Policy, Expect-CT, Set-Cookie, NEL, Server,
+Content-Type, and the five caching headers. Two things make it worth reading:
+
+- **It draws the inventory/judgement line where principle 2 draws it, and it
+  drew it independently.** `cryptolyzer/httpx/headers.py` is 55 lines and its
+  whole job is `'Check which response headers are sent by the server(s)'` — an
+  inventory, no findings. Its `httpx/content.py` is the other half and needs
+  the response *body* (it walks tags for SRI attributes and mixed content),
+  which is the same wall this package's out-of-scope rulings keep hitting.
+- **The parse layer is a separate repository**, `security/cryptoparser`, which
+  has its own entry below. Note that `submodules/cryptoparser` *inside this
+  checkout* is an empty gitlink and always will be — `pull.sh` does not do
+  submodules, which is why the sibling clone exists. Read the sibling; the
+  empty directory is not a problem to solve.
+
+**`security/cryptoparser`** — cryptolyzer's parse layer, cloned separately
+2026-08-21 so `pull.sh` maintains it. `cryptoparser/httpx/header.py` is
+**2 028 lines and the most complete typed model of HTTP header *values* on
+disk**: `attrs` classes, one per header and one per directive, each with
+`_parse()` and `compose()` so every header round-trips. The nearest thing to a
+rival design for `message.py` plus the family modules, and the closest
+available answer to "what would this package look like if the value model were
+the product rather than the findings".
+
+- **Coverage is 22 headers, and lopsided against this package's.** Age,
+  Cache-Control, Content-Type, CSP, CSP-Report-Only, Date, ETag, Expect-CT,
+  Expect-Staple, Expires, Last-Modified, NEL, Pragma, Public-Key-Pinning,
+  Server, Set-Cookie, Referrer-Policy, HSTS, X-Content-Security-Policy, XCTO,
+  XFO, X-XSS-Protection. Wider on caching and on the obsolete set, **narrower
+  on everything modern** — no COOP, COEP or CORP, no Permissions-Policy, no
+  Clear-Site-Data, no Integrity-Policy, no reporting headers, no
+  `Access-Control-*`. Read it for the modelling, not for coverage.
+- **Do not copy its header-name table.** One entry is simply wrong:
+  `:1644` registers `code='public-key-pinning'` /
+  `normalized_name='Public-Key-Pinning'`, and the string `Public-Key-Pins` —
+  the name RFC 7469 actually defines, and the one OWASP's corpus tracks —
+  appears **zero times in the file**, so that parser can never match the header
+  on the wire. Worth knowing for its own sake and as a warning: a round-trip
+  `_parse()`/`compose()` test cannot catch this, because both directions read
+  the same wrong constant. That is the "passes both ways" failure the working
+  practices above describe, sitting in production code.
+- **`Set-Cookie` is parsed, the prefixes are not.** `HttpHeaderFieldValueSetCookie`
+  (`:1399`) carries `name`, `value`, `expires`, `max_age`, `domain`, `path`,
+  `secure`, `http_only`, `same_site`, split across two layers: the value class
+  takes `name=value` and delegates the rest to
+  `HttpHeaderFieldValueSetCookieParams`, a semicolon-separated field set. Its
+  `SameSite` is a `StringEnumCaseInsensitiveParsable`, matching the
+  case-insensitivity the parked item verified. But `__Host-`, `__Secure-`,
+  `__Http-`, `__Host-Http-` and `Partitioned` appear **zero times in the file**
+  — so this is a parse model to borrow from and **not** a source for the four
+  prefix rules, which stay this package's own work off
+  `CookiePrefixes.cpp` and `cookie_util.cc`.
+- **Its XFO value set is `{DENY, SAMEORIGIN}` case-insensitive, with
+  `ALLOW-FROM` absent from the file entirely.** An independent parser that
+  simply does not admit the value, which is corroboration for rating
+  `xfo-allow-from` an `error` rather than a deprecation note.
+- **CSP is modelled as a closed grammar, not strings.** Nonce, hash, scheme,
+  host and keyword are five distinct parsable source types
+  (`ContentSecurityPolicySourceHash`, `…Nonce`, `…Scheme`, `…Host`,
+  `…Keyword`), with the keyword set closed at nine (`'none'`,
+  `'report-sample'`, `'self'`, `'strict-dynamic'`, `'unsafe-allow-redirects'`,
+  `'unsafe-eval'`, `'unsafe-hashes'`, `'unsafe-inline'`, `'wasm-unsafe-eval'`).
+  A source-list type that cannot represent an unparsed string is the structural
+  answer to principle 4's substring bug — worth reading before the next CSP
+  change, whether or not the model is adopted.
+- **`test/httpx/test_header.py` is 1 143 lines of real header values** with
+  their expected parses. The only per-header parse corpus on disk that is not
+  this package's own `tests/`, so it is a free source of awkward inputs to
+  check `message.py` and the family parsers against.
+
+**`documentation/BChecks`** — PortSwigger's official BCheck library, a
+declarative scan-check DSL (`metadata:` / `define:` / `given response then`).
+Surveyed 2026-08-21. Its value here is mostly evidentiary:
+
+- `archived/Content-Security-Policy.bcheck` is **principle 4's failure mode
+  shipped by a major vendor and then archived by them**. Every decision is
+  substring containment against the whole header block — `" *" in
+  {to_lower(latest.response.headers)}`, `" 'unsafe-inline'"` flagged with no
+  nonce or `strict-dynamic` awareness — and `report-uri` and
+  `block-all-mixed-content` are listed among its "insecure values". It even
+  carries the epitaph: *"the deprecated `referrer` value was removed from
+  insecure_value due to causing false positives from the Referrer-Policy
+  header"*. Cite this when someone proposes a substring check.
+- `other/Cookie-SameSite-Disabled.bcheck`, `other/tokens/`
+  `cookie-cached-on-disk.bcheck` and
+  `other/corsCredentialedRequestsMisconfiguration.bcheck` are small independent
+  opinions for the parked cookie work and the CORS rulings.
 
 **`security/shcheck`** and **`security/shcheck-fork`** — this package's own
 provenance, now checkable instead of recalled. `security/shcheck` is santoru's
@@ -888,6 +1068,27 @@ scraped MDN *rendering*, carrying `"Yes"` and `"?"` where versions belong;
 `documentation/browser-compat-data` is the machine-readable original and the
 only one of the two that records flags, partial implementations and
 `version_added: false`.
+
+**`documentation/http.dev`** — **not a git repository**, and the first thing to
+know about it. It is an unpacked HTML scrape of http.dev, like
+`web_browsers/lynx2.9.3` is an unpacked tarball, so `pull.sh` reports it
+`skipped (not a git repository)` and any `git` command run *inside* it walks up
+and answers about the git-mirror repo at the root of `/home/crapula/ref` —
+which looks alarmingly like a mirror pointing at the wrong origin, and is not.
+Surveyed 2026-08-21. 506 files, no extensions: 138 status-code pages and 365
+non-numeric ones, mostly one per header name with a few topic pages
+(`caching`, `authentication`). Two uses and one trap:
+
+- **The broadest header-name list on disk** — 365 against
+  `known-http-header-db`'s 271 — which makes it the best candidate corpus for
+  the parked inverted *"interesting headers"* switch. It is HTML, so strip tags
+  before using it as data.
+- Readable prose per header when orientation is wanted on something nobody here
+  has met.
+- **Never cite it for browser support.** Its "Baseline: Widely available"
+  banners are rendered from web-features/webstatus.dev, so it is BCD at second
+  hand — the same trap this section already records for caniuse.com, one step
+  further removed.
 
 **`w3c/webref`** — mechanically extracted content of **752 crawled web specs**,
 and the answer to the spec gap this section otherwise records as unclosable:
@@ -991,6 +1192,21 @@ moment the question is per-directive or per-value.
   `burp/burp-samesite-reporter` is 326 lines of Java that
   classifies each cookie as `SameSite` missing / `None` / other and carries its
   reasoning in the issue prose.
+  `cookie_security/cookie-security-analyzer` (added to the survey 2026-08-21)
+  is the one peer with an explicit **severity ladder** for cookies: a Chrome
+  MV3 extension rating each one `SAFE` / `LOW RISK` / `MEDIUM RISK` /
+  `HIGH RISK` in `src/popup.ts` from `secure`, `httpOnly`, `sameSite` and
+  third-party status — `pageIsSecure && !secure`, `sameSite` unspecified, and
+  `sameSite === "None" && !secure` are its three rules. Read it for the ladder,
+  and note what it cannot do: it reads `chrome.cookies`, not `Set-Cookie`, so
+  the prefixes are invisible to it and it implements **none** of the four. That
+  blind spot is the argument for parsing the wire header rather than a cookie
+  store, and it is why this repo is worth naming despite sitting in a directory
+  the "Everything else" section otherwise writes off.
+  For the **parse** side rather than the rules, `security/cryptoparser`'s
+  `HttpHeaderFieldValueSetCookie` is the typed Python model to compare against
+  — see its entry above, including the warning that it implements none of the
+  four prefixes.
 - **`documentation/Open-Cookie-Database`** — 2 264 cookies as CSV and JSON,
   keyed by name, each with platform, category (Functional / Personalization /
   Analytics / Marketing / Security), retention period and a `Wildcard match`
@@ -1035,8 +1251,14 @@ moment the question is per-directive or per-value.
   lowercasing rather than a convenience.
 - **`security/Security-Headers-Validator`** — one module per header under
   `headers/`, and the only tool on disk carrying `pragma.py` *and*
-  `cache_control.py`, so it is the one independent opinion available on both
-  parked cache items before writing `pragma-ineffective`.
+  `cache_control.py`, so it is the one independent *opinion* available on both
+  parked cache items before writing `pragma-ineffective`. For the parse side,
+  `security/cryptoparser` models both — a `Cache-Control` response class with
+  `max-age`, `s-maxage`, `no-cache`, `no-store`, `must-revalidate`,
+  `proxy-revalidate`, `public`, `private` and `no-transform` as typed
+  directives, and `Pragma` as a header in its own right — which is the closed
+  directive set the "no `Cache-Control` prevents storage" condition has to be
+  written against.
 - **CSP allowlist-bypass corpora, still not embedded.** `burp/csp-auditor` has
   `csp-auditor-core/src/main/resources/resources/data/csp_host_user_content.txt`
   and `csp_host_vulnerable_js.txt` — a second curated list beside
@@ -1045,20 +1267,91 @@ moment the question is per-directive or per-value.
   `csp_parser.py` but a `csp_known_bypasses.py` holding exactly one domain, so
   it is no substitute for either. The **Not embedded** ruling covers all of
   them; nothing here changes the upkeep argument.
+- **`burp/burp-javascript-security-extension`** — the only peer on disk that
+  ties CSP to subresource integrity, and it is instructive for being wrong
+  twice over. `src/main/java/burp/BurpExtender.java:135` is
+  `if (!response.contains("Content-Security-Policy: require-sri-for script;"))`
+  — an exact-substring test, trailing semicolon included, so it fires on every
+  correct policy that omits the `;`, capitalises differently, or orders its
+  directives another way. That is principle 4's failure mode inverted: the
+  shcheck bug was a match too loose, this is a match too tight, and both
+  produce a finding on a correct configuration. Second, the directive it asks
+  for is dead — **MDN BCD carries no `require-sri-for` key at all** under
+  `http/headers/Content-Security-Policy.json` (verified 2026-08-21), the same
+  absence that decided the CSPEE and `Access-Control-Allow-Private-Network`
+  rulings. `Integrity-Policy` is the live mechanism for this and is already
+  analysed here. Do not port this check.
 - **`burp/Additional_CORS_Checks`** — Kotlin, and the prior art for the parked
   active origin-reflection check: it re-issues a request with a forged `Origin`
   and reports arbitrary-origin and `null`-origin reflection (`doc/*.png` shows
   what it claims). Tool-side work, exactly as that item says.
+- **`burp/t0xodiles-cors-check`** — the *second* implementation of that same
+  check, found 2026-08-21, and the reason the CORS ruling can be called
+  corroborated rather than reasoned: it decides on exactly the same bit
+  (`ACAO` equal to the origin it sent), from a different author, in a codebase
+  last touched 2026-05-31 where `Additional_CORS_Checks` stopped in 2022. It
+  adds one axis the other lacks —
+  `src/main/kotlin/TrustedDomainValidationBypassCheck.kt` carries **24
+  hand-written allowlist-regex bypass patterns**, 23 of them distinct — one is
+  listed twice and two more are commented out. They are the trusted domain and
+  the attacker domain joined by each of eighteen punctuation characters (`_`,
+  `-`, `,`, `;`, `!`, `'`, `(`, `)`, `*`, `&`, `+`, `=`, `~`, `$`, `{`, `}`, a
+  backtick and a double quote) or by a bare dot, plus the concatenations
+  `trusted.comweb-attacker.com`, `web-attacker.com.trusted.com`,
+  `anythingtrusted.com` and `strusted.com` — each tried as both `http://` and
+  `https://`. `TrustedDomainCheck.kt` bootstraps from a domain it has
+  *observed* to be trusted, then enumerates subdomains of it. Take the pattern
+  list from here when the active checks land; take the severity rule
+  (reflection × `ACAC: true`) from `Additional_CORS_Checks`.
+- **`burp/additional-scanner-checks`** — small, from 2018, and worth an entry
+  only because it corroborates two decisions this package otherwise made alone.
+  Its BApp description lists *"Multiple occurrences of the checked headers"* as
+  a check in its own right, for HSTS and X-XSS-Protection — `duplicate-headers`
+  by another name. And `Burp-MissingScannerChecks.py:316` reaches the
+  `identity()` conclusion independently: *"it is assumed that multiple
+  `X-Content-Type-Options: nosniff` headers can't cause confusion at browser
+  side because they all have the same meaning"*, which is this package's "a
+  repeated header with identical values still reports once" in someone else's
+  words. It also demonstrates the failure `_sole_value()` exists to avoid —
+  `:120` carries `# TODO: multiple max-age directives cause confusion!` on its
+  HSTS regex, unresolved.
+- **The Burp extension-development kit**, if a Burp front-end for this library
+  is ever wanted: `documentation/burp-extensions-montoya-api` is the current
+  API (`documentation/burp-extender-api` is the same thing deprecated, by
+  upstream's own README), with `documentation/`
+  `burp-extensions-montoya-api-examples` — whose `customscanchecks/` is the
+  relevant one — plus `documentation/extension-template-project` as a
+  ready-made Gradle skeleton and `burp/example-scanner-checks` as the
+  three-language version. Packaging material, not analysis material; noted so
+  it is not rediscovered as though it were.
 
 ### Everything else — assume it is not interesting
 
-`/home/crapula/ref` holds far more than the whitelist above: 35 GB of
-operating-system source, a dozen application servers, seven cookie tools and
-two dozen Burp extensions of which only the eight named above touch a header
-value or a cookie flag. **Nothing outside this section is relevant unless the
-human says so.** Do not survey it, do not grep it speculatively, and do not
-re-derive that it is uninteresting — that was done once, and the cost of doing
-it again is the reason this paragraph exists.
+`/home/crapula/ref` holds far more than the whitelist above: **153 repositories
+and unpacked trees across ten categories**, of which 35 GB is operating-system
+source, a dozen are application servers, seven are cookie tools and **80 are
+Burp extensions** — and only the dozen or so named above touch a header value
+or a cookie flag. **Nothing outside this section is relevant unless the human
+says so.** Do not survey it, do not grep it speculatively, and do not re-derive
+that it is uninteresting — that was done once, and the cost of doing it again is
+the reason this paragraph exists.
+
+**How far the negative reaches, because the tree grows.** Everything present on
+**2026-08-21** was surveyed, superseding an earlier pass that had seen only 83
+repositories — which is why this paragraph used to say "two dozen Burp
+extensions" and was wrong by 55 of them. So the blanket negative is good for
+what was on disk that day and **claims nothing about anything added since**. It
+went stale silently once and will again; a dated survey is the honest form.
+
+To tell what is new, compare directory mtimes against the survey date: the
+clones surveyed then are stamped 2026-08-12 to 2026-08-21, so anything later is
+an addition. Treat it as a hint rather than proof — a directory is restamped
+whenever a top-level entry appears or disappears, so an upstream that added a
+file will look new. **Do not look for a manifest.** A `research.tsv` may or may
+not be sitting at the root of `/home/crapula/ref`; it was written once to
+exercise `export.sh`, it is not maintained and is expected to be deleted, and
+reading it as an inventory would under-report the tree by 70 repositories. When
+the mtime is ambiguous, ask rather than re-survey 153 repositories.
 
 Only the negatives that would otherwise look promising are kept:
 
@@ -1072,13 +1365,44 @@ Only the negatives that would otherwise look promising are kept:
   `hiawatha/src/send.c` emits HSTS itself rather than by configuration.
 - **The remaining `burp/` and `cookie_security/` repos** — JWT tooling, WAF
   fingerprinting and cookie *decryption*, HAR/Nessus/sitemap import, request
-  smuggling, nuclei and semgrep bridges, and GDPR consent scanners. Burp
-  plumbing and privacy-compliance tools; none analyses a header value or a
-  cookie flag.
+  smuggling, nuclei and semgrep bridges, GDPR consent scanners, 403/429 and WAF
+  bypass helpers, GraphQL and OpenAPI tooling, AI assistants, and PortSwigger's
+  own example extensions. Burp plumbing and privacy-compliance tools; none
+  analyses a header value or a cookie flag. Four that look like exceptions and
+  are not, checked 2026-08-21 so they are not re-opened: `burp/identity-crisis`
+  diffs responses across **request** `User-Agent` values;
+  `burp/BurpSuite_CookieReflection` and `burp/sri-check` both need the response
+  **body** (a cookie echoed into it, an `integrity` attribute on a tag);
+  `burp/http-terminator` is request smuggling, already out of scope. Two data
+  files were weighed for the parked inverted *"interesting headers"* switch and
+  lost to humble's 1 287-name `fingerprint.txt`: `burp/waf-detect`'s 64-row
+  `resources/WafFingerprints.csv` (which does have a `HEADER_ONLY` column and
+  header-anchored regexes such as `^Server: AkamaiGHost` and
+  `^Set-Cookie: ak_bmsc=`) and the 114-regex `match-rules.tab` shared by
+  `burp/software-version-reporter` and
+  `burp/burp-suite-software-version-checks` — the latter is the only one that
+  extracts a *version* out of a value rather than just naming the product, so
+  revisit it if the switch ever wants that. And `cookie_security/`
+  `sentry-watchdog`'s `known_cookies.json` is not a cookie database: it is the
+  cookies observed on Sentry's own marketing sites, keyed `name/domain`.
+- **`security/nmap-nse-vulnerability-scripts`** — named only because the name
+  promises far more than it holds. It is NCC's three unrelated NSE scripts
+  (Lexmark, PJL, SMTP), **not** the nmap NSE corpus, so
+  `http-security-headers.nse` is not here and this is not the independent
+  opinion it looks like. Same for `security/retire.js` (JS library CVEs),
+  `security/IIS-ShortName-Scanner`, `security/cloud_ip_ranges`,
+  `security/nsdp-discover` and `vulnerable/research-labs` — the last is three
+  PortSwigger research labs (token signing, PDF rendering, control-character
+  injection), none header-related, though the `vulnerable/` category is where
+  an end-to-end fixture would live if one ever appears, beside
+  `security/badssl.com`.
+- **`documentation/xss-cheatsheet-data` and `documentation/url-cheatsheet-data`**
+  — PortSwigger's cheat-sheet corpora as JSON. Payload data for injection and
+  SSRF testing; nothing about response headers.
 
 ## Status
 
-96 codes (35 error / 26 warning / 35 note), each with a rating and a message
-template, and every rendered sentence pinned by a snapshot. 324 tests, 153 test
+102 codes (39 error / 26 warning / 37 note), each with a rating and a message
+template, and every rendered sentence pinned by a snapshot. 357 tests, 166 test
 functions, all passing; `ruff check` clean. `pyproject.toml` is a placeholder — hatchling, no
 README yet, `hstspreload` declared as the optional `[preload]` extra.
