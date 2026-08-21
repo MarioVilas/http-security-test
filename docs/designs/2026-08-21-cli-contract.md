@@ -105,9 +105,18 @@ The CLI is verb-first, git-shaped. `hst example.com` is a usage error.
 
 **`scan`** — fetch and analyse. The 95% case and the bulk of this document.
 
-**`explain`** — with arguments, print what a code means: its level, the header it
-belongs to, and its message template. With no arguments, list every code. About
-25 lines over `MESSAGES` and `FINDING_SEVERITY`.
+**`explain`** — with arguments, print what a code means: its level and its
+message template. With no arguments, list all 102. About 25 lines over
+`MESSAGES` and `FINDING_SEVERITY`.
+
+**It does not print the header the code belongs to, and cannot.** There is no
+runtime code-to-header mapping: `test_each_code_belongs_to_exactly_one_header`
+derives ownership by running the corpus, which is test data the package does
+not ship. Two ways to fake it were rejected — a table in `cli/` would duplicate
+knowledge the analysers own and rot the first time a code moves, and deriving
+the header from the code's prefix (`csp-`, `xfo-`) is a guess dressed as a
+lookup. Recorded under *Handed to the analyser* instead. Listing therefore
+groups by code prefix, which is a lexical sort and claims nothing.
 
 It earns its place in v1 for three reasons beyond being useful at a terminal.
 It is the natural companion to machine output — a reader who gets
@@ -744,6 +753,24 @@ which is the reason CLAUDE.md gives for not reporting an absent `Content-Type`
 Note HSTS is *absent* from that list and should be — on the https legs of a
 chain, a redirect is precisely where HSTS matters. So per-hop analysis is
 genuinely valuable; it is the representation-scoped headers that misfire.
+
+### A code-to-header table
+
+`explain` wants to say which header a code belongs to and has no way to ask.
+CLAUDE.md already states the invariant — *"a code belongs to exactly one
+header"*, `duplicate-headers` excepted — and a test pins it, but the mapping
+exists only inside that test, reconstructed by running the corpus.
+
+A public `CODE_HEADER` dict would make `explain` complete, and it has a second
+consumer waiting: SARIF's `rules[]` wants a rule's owning component, and the
+reserved machine output for `explain` is the cheapest route to the SARIF
+writer. It would also let the existing invariant test assert against a declared
+table rather than a derived one, which is the stronger form of that test —
+today the test can only prove the corpus is self-consistent, not that the
+package agrees with it.
+
+Not attempted here: it is an analyser change, and this document changes no
+analyser module.
 
 **This is why `--all-hops` is reserved rather than shipped.** It becomes a small
 follow-up once the analyser can see the status — most naturally as part of the
