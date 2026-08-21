@@ -175,7 +175,7 @@ stdin, one per line.
 | `--proxy URL` | — | **new** |
 | `-n, --no-redirect` | off | unchanged |
 | `--scope PATTERN` | derived from targets | **new**, repeatable; quote the wildcard |
-| `--max-redirects N` | `10` | **new** |
+| `--max-redirects N` | `10` | **new**; `_Chain` must also pin urllib's own `max_redirections` and `max_repeats` to it — see below |
 | `-o, --output FORMAT:PATH` | — | **new**, repeatable; replaces `-j` as the general mechanism |
 | `-oA, --output-all PREFIX` | — | **new** |
 | `-j, --json` | off | kept as sugar for `-o json:-`, and so suppresses the terminal report |
@@ -277,6 +277,29 @@ Three rules, each pinned because ambiguity here is expensive:
 `{a.com, *.a.com, b.com, *.b.com}`, so an `a.com` → `b.com` redirect is
 followed. This is deliberate and differs from the mode draft, which would have
 refused it: both hosts are things the operator typed.
+
+### urllib's own redirect ceilings must be pinned to ours
+
+*Found 2026-08-21 by the final review, against a loopback server.*
+`HTTPRedirectHandler` carries `max_redirections = 10` and `max_repeats = 4`, and
+CPython calls `redirect_request()` **first** and only then applies them — so our
+limit wins below 10 and urllib's wins at or above it. Three consequences, and
+the middle one is the default invocation:
+
+- `--max-redirects` above 10 silently does nothing.
+- `max_repeats = 4` fires on any two-URL loop after ~9 hops, under the limit the
+  operator set.
+- When either fires, urllib raises `HTTPError` carrying the 3xx, the fetcher
+  treats it as a response, and **no refusal is recorded** — indistinguishable
+  from a site that genuinely answered 302. Worse, `HTTPError.reason` is the
+  message, so a three-line English sentence with embedded newlines lands in
+  `source.reason` in the evidence file.
+
+`_Chain.__init__` therefore sets `self.max_redirections = self.max_repeats =
+limit`. Our own check then always fires first and records a proper
+`max-redirects` refusal hop. This does hand loop protection entirely to
+`_Chain.limit` — which is correct, because it bounds total hops regardless of
+loop topology: `len(self.hops)` upper-bounds both of urllib's counters.
 
 ### The quoting hazard
 
@@ -685,9 +708,15 @@ module behind a narrow function: swapping it should be a file, not surgery.
 Unchanged in spirit from `scan.py`: a block per result with a status line, the
 redirect chain, findings, then inventories unless `-q`. Four additions.
 
-- **The scope line prints before the first request**, derived or explicit. It
-  is the one piece of output that appears whether or not anything is found, and
-  it is what makes the guard auditable rather than mysterious.
+- **The scope line prints before the first request**, derived or explicit, and
+  it goes to **stderr**. It is the one piece of output that appears whether or
+  not anything is found, and it is what makes the guard auditable rather than
+  mysterious — which is exactly why it cannot be gated on the terminal report.
+  *Corrected 2026-08-21 during implementation:* it was first written to stdout
+  behind the same `show` gate as the report, so `-j` printed no scope line at
+  all — the one mode where nothing else records the guard, since the run
+  document deliberately carries no scope. This section's own rule settles it:
+  diagnostics go to stderr.
 - Refused hops print with their reason.
 - A run of more than one target ends with a summary: counts by level, and
   failures by kind. About ten lines, and it is the bulk-sweep affordance.
@@ -699,7 +728,16 @@ the operational-failure flag is remembered for the exit code.
 
 ## Testing
 
-No test touches the network.
+No test touches the network, with one deliberate exception.
+
+**The exception, added 2026-08-21:** the redirect-limit test binds a loopback
+`http.server.HTTPServer` on `("127.0.0.1", 0)` — ephemeral port, daemon thread,
+torn down in a `finally`. It is hermetic: no external traffic, no DNS, no
+dependency on the internet. It exists because `_Chain` has to override urllib's
+own `max_redirections` (10) and `max_repeats` (4), and that interaction lives in
+urllib's redirect bookkeeping rather than in our handler, so a unit test on
+`redirect_request()` cannot see it. Do not use a loopback server for anything
+else.
 
 - **`main(argv)` returns an int and does not call `sys.exit`** (argparse aside),
   so the whole CLI is testable in-process.

@@ -15,7 +15,6 @@ In no particular order:
 - cookies analysis (flags + heuristically detect session cookies)
 - jwt analysis (passive for sure cause it's basically free, probably not active since there are other tools for this anyway)
 - csrf token detection (maybe?)
-- cli tool (active tests + passive via imported files)
 
 ## References
 

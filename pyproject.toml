@@ -16,6 +16,10 @@ authors = [{ name = "Mario Vilas", email = "mvilas@gmail.com" }]
 # analysis runs without it and simply leaves that one claim unchecked.
 preload = ["hstspreload"]
 
+[project.scripts]
+hst = "http_security_test.cli:main"
+http-security-test = "http_security_test.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/MarioVilas/http-security-test"
 

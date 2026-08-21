@@ -1,8 +1,16 @@
 # http-security-test
 
-An HTTP security header **analysis engine**. Library only — there is deliberately
-no CLI. It began as a fork of `shcheck` and outgrew it; the fork's tool has been
-deleted and only the analyzer survives.
+An HTTP security header **analysis engine**, plus a command-line tool over it.
+It began as a fork of `shcheck` and outgrew it; the fork's tool was deleted and
+only the analyser survived, until `hst` was written against the analyser rather
+than tangled into it.
+
+**The engine is still library-only in the sense that matters: it never fetches
+anything.** Every network call lives in `cli/live.py`, `import
+http_security_test` pulls in no fetching code of ours, and a test pins that
+nothing outside `cli/` names `cli`. Do not relax that direction — it is what
+lets the analyser be embedded in a Burp extension, a CI job or a notebook
+without dragging a tool along.
 
 GPL-3.0-or-later. Every source file carries the notice.
 
@@ -20,7 +28,23 @@ legacy.py      the obsolete headers
 response.py    tables, registry, cross-header rules, analyze_all, inventory, orphans
 reporting.py   report(): findings + inventories as plain data, ready for JSON
 __init__.py    public API
+
+cli/           the `hst` tool -- the only code here that opens a socket
+  __init__.py    main(argv) -> int: parse, dispatch, exit codes
+  meta.py        TOOL_NAME, tool_version(), USER_AGENT, LEVELS
+  options.py     the entire argparse contract, one file to read the CLI
+  commands.py    do_scan(), do_explain(): glue, one function per verb
+  exchange.py    Exchange, Hop, Failure: what crosses the input seam
+  scope.py       host patterns -- where a redirect may wander
+  live.py        the live source: urllib, redirects, TLS, proxy
+  run.py         run_document(): results -> the JSON run envelope
+  text.py        render(): the human-readable report
+  writers.py     format table, -o resolution, the writers
 ```
+
+`cli/` is flat for the same reason the analyser is. `sources/` and `formats/`
+directories become worth having at three implementations each; today they would
+be ceremony. When the HAR parser lands, `har.py` sits beside `live.py`.
 
 Dependencies run one way and there are no cycles:
 
@@ -29,7 +53,26 @@ findings, message, catalog  ->  (nothing)
 csp, hsts, isolation, legacy, policies  ->  findings [, message]
 response   ->  all of the above except catalog
 reporting  ->  response, findings, catalog
+
+cli.exchange, cli.scope  ->  (nothing)
+cli.meta     ->  SEVERITIES, from the public API
+cli.run      ->  cli.meta
+cli.text     ->  cli.exchange, cli.meta
+cli.writers  ->  cli.text
+cli.live     ->  cli.exchange, cli.scope, parse_headers
+cli.commands ->  all of the above + report(), FINDING_SEVERITY, MESSAGES, hsts
+cli.options  ->  cli.commands, cli.meta
+cli.__init__ ->  cli.options
 ```
+
+`cli.meta` holds `LEVELS = tuple(reversed(SEVERITIES))` rather than restating
+the severity vocabulary, which is why `options` needs no import of the renderer
+just to spell `--min-level`'s choices — and why adding a level upstream cannot
+silently desynchronise the two.
+
+**Nothing outside `cli/` may import `cli`**, and a test asserts it by walking
+the AST of every analyser module. That single grep is what keeps the claim in
+the opening paragraph true.
 
 `catalog.py` is a leaf on purpose and **no analyser may import it**. The
 analysers emit `(header, code, data)` and hold no prose; only `reporting.py` and
@@ -42,7 +85,9 @@ exported callable must not share a name (`from .message import ...` sets
 `http_security_test.message` to the submodule and silently clobbers a function
 of that name -- which is why the renderer is `describe()` and not `message()`),
 and `catalog.py` is not called `messages.py` because one character from
-`message.py` is not a distinction.
+`message.py` is not a distinction. The rule bit again in `cli/`: the fetch
+module is `live.py` exporting `fetch()` rather than `fetch.py`, and the envelope
+module exports `run_document()` rather than `run()`.
 
 **The boundary that matters:** a family module answers *"what is wrong with this
 header"* — a value in, findings out, no knowledge of siblings. `response.py`
@@ -222,8 +267,9 @@ Decisions inside that shape, each of which had an alternative:
   always being `{}`: content this package *derived* is always present, content
   it was merely *given* is present only if it was given.
 
-The `raw` blobs are optional and this package never fetches anything, so they
-are whatever the caller hands over. Two things decided about them:
+The `raw` blobs are optional and the analyser never fetches anything, so they
+are whatever the caller hands over — `cli/live.py` is what supplies them for a
+live scan, and it does so only under `--raw`. Two things decided about them:
 
 - **The library does the base64**, from bytes or text, text encoded latin-1 to
   match what `parse_raw_headers()` decodes with. One encoding decision in one
@@ -249,6 +295,154 @@ inventories from findings does **not** work and the temptation is real: the 91
 information headers and the 5 caching headers emit no findings at all by design,
 and `missing` deliberately differs from the `-missing` findings wherever a
 suppression applies.
+
+## The CLI
+
+`hst`, added 2026-08-21. `docs/designs/2026-08-21-cli-contract.md` is the
+contract and the full reasoning; this is the part worth carrying in your head.
+
+```sh
+hst scan https://example.com          # the 95% case
+hst scan -oA evidence example.com     # nmap-style: terminal AND files
+hst scan -j example.com | jq .        # machine output on stdout
+hst explain csp-unsafe-inline         # what a code means
+```
+
+Two console scripts, `hst` and `http-security-test`, both at
+`http_security_test.cli:main`. **Standard library only** — `pip install
+http-security-test` gives a working tool with no dependencies, and there is
+deliberately no `[cli]` extra, because an extra that installs nothing
+misrepresents the package.
+
+**Verb-first, and the bare form is deliberately a usage error.** `hst
+example.com` exits 2 with `did you mean: hst scan example.com`. A flat,
+curl-shaped CLI was considered and rejected: every file-input format on the
+roadmap has a flag set disjoint from `scan`'s — no `-k`, no `-H`, but filters a
+single fetch has no use for — and retrofitting verbs onto a flat tool breaks
+every invocation anyone has written down.
+
+**nmap's output model, and it is not only ergonomics.** The terminal always
+shows the run; `-o FORMAT:PATH` (repeatable) and `-oA PREFIX` write files. With
+several simultaneous outputs the pipeline is *forced* to materialise one
+plain-data run document and render it N times, rather than letting a renderer
+walk live objects — the same discipline `reporting.py` imposes on the analyser,
+and the reason a SARIF writer will be a pure function over data that already
+exists. Corollaries: colour is a terminal property and never reaches a file,
+and **`--min-level` filters the terminal only** so evidence files stay complete.
+
+**Exit codes are frozen.** 0 ran clean; 1 findings at or above `--fail-on`;
+2 usage error (argparse's own, which we do not fight); 3 a target could not be
+reached. **Findings never make the exit nonzero by default** — a pentester with
+`set -e` must not have a loop die because a site is missing CSP, and CI opts in
+with `--fail-on`. **3 beats 1**, because an incomplete answer is the more
+serious fact: a gate reporting "clean" after failing to reach half its targets
+is worse than useless.
+
+**Failure kinds, not retryability.** `dns`, `refused`, `timeout`, `reset`,
+`tls`, `protocol`, `other`, from one exception-to-tag mapping. "Retryable" is a
+prediction; the kind is a fact, and a calling tool predicts for itself. Note
+`classify()` returns `None` for an `HTTPError`: a WAF's 403 is a response whose
+headers are worth analysing, not a failure. Two live-tested details that will
+otherwise be "tidied" wrong — urllib wraps only what `h.request()` raises, so
+`BadStatusLine` and `RemoteDisconnected` arrive **bare** while connect-phase
+errors arrive inside `URLError`; and `RemoteDisconnected` subclasses both
+`ConnectionResetError` and `BadStatusLine`, so the reset branch catches it and a
+separate branch would be dead code.
+
+### The run envelope, and the three schema questions it answers
+
+```json
+{"schema": 1,
+ "tool": {"name": "http-security-test", "version": "0.1.0"},
+ "run": {"started": "...", "finished": "..."},
+ "results": [{"outcome": "ok", "target": "example.com",
+              "source": {"kind": "live", "url": "...", "status": 200,
+                         "reason": "OK", "hops": [...]},
+              "report": { ...verbatim from report()... }},
+             {"outcome": "failed", "target": "...",
+              "failure": {"kind": "dns", "message": "..."}}]}
+```
+
+**`report` holds what `report()` returned, unmutated.** Run facts live in the
+sibling `source` key. That is what lets *"a response does not know where it came
+from"* stay literally true instead of being worked around, and it keeps the two
+contracts separable: `schema` versions the wrapper, `tool.version` versions the
+contents. The throwaway `scan.py` used to splice `result["url"] = final` into
+the document and label it "not part of the schema"; that hack is gone.
+
+**`source.kind` is the discriminator, and it is where the next input format
+slots in.** A HAR result reads `{"kind": "har", "file": ..., "entry": 12, ...}`
+in the same slot. This is the cheap form of extensibility: **the polymorphism
+lives in the document, not in the call graph**, which is why there is no source
+registry and should not be one until a second source exists.
+
+The three questions CLAUDE.md used to park under *"The schema is not finished"*
+are answered, and answered **without touching the library**:
+
+- **A version field:** `schema`, an integer, owned by the envelope. A version is
+  a property of a *serialised artifact*; `report()` returns a dict, and the CLI
+  is what writes files that outlive the process.
+- **Run metadata:** yes, tool name and version, because reproducibility is the
+  stated reason `raw` exists. Without it, a finding that vanished between two
+  archived reports is ambiguous — the site was fixed, or a rule changed.
+- **How several results travel:** a list, never a URL-keyed map. Keying by URL
+  was already rejected and is independently wrong here, since one target can
+  yield several results and the same URL can be scanned twice in one run.
+
+Deliberately absent: **the command line**, because it carries `-H
+'Authorization: …'` and proxy credentials, and redacting means guessing at
+secrets. The precise provenance record already exists — `--raw` gives the actual
+request head, with its credential warning attached. One documented footgun beats
+two, one of them fuzzy.
+
+### Scope is declared, never derived — and this generalises
+
+`--follow {none,host,subdomain,any}` was designed and then deleted: every value
+of it turned out to be a host pattern. What ships is `-n/--no-redirect` plus
+`--scope PATTERN` (repeatable), defaulting to `{H, *.H}` for each target host
+and **printed to stderr before the first request** so the guard is auditable.
+`*.example.com` does not match the apex and does match at any depth — decided on
+composability, because keeping them disjoint is what gives "subdomains but not
+the apex" a spelling at all.
+
+**A derived "sibling" rule was proposed and killed by measurement.** From
+`example.co.uk` a label-counting rule derives `co.uk` and would admit
+`evil.co.uk`. Chromium's PSL (`net/base/registry_controlled_domains/`
+`effective_tld_names.dat`, read 2026-08-21): **6934 ICANN rules, 5470 of them
+multi-label, 3367 two-label suffixes across 195 ccTLDs** — a second level is the
+norm for country TLDs, not an exception, and `.in` carries `5g.in`/`6g.in`, so
+the pattern is still growing. Three approximations were tried and all fail: a
+two-label floor misses `.co.uk`; refusing a two-label parent under a two-letter
+TLD then breaks `.de`, `.io`, `.fr` and most of Europe; and a shared-suffix test
+cannot distinguish `www.example.co.uk -> shop.example.co.uk` from
+`example.co.uk -> evil.co.uk`. **Sibling scoping is PSL-or-nothing**, and
+vendoring a PSL is the csp-evaluator objection again (curated data that ages,
+failing *open* when stale).
+
+**The precedent is wider than one flag.** Any "same site" notion this tool grows
+— CORS origin checks, cookie `Domain` analysis, `__Host-` reasoning — hits the
+same wall. And nothing here is called **same-site**: that term has a precise
+PSL-backed meaning in RFC 6265bis and Fetch, and attaching it to a looser rule
+would be exactly the borrowed-term sloppiness this document warns about
+elsewhere.
+
+### `-o` resolution, and the bug that is easy to reintroduce
+
+Given one `-o` argument: if it contains a colon **and the text before the first
+colon is a known format name**, that is the format and the rest is the path;
+otherwise the whole argument is a path and its extension decides; otherwise a
+usage error naming both fixes. **Invariant: no single-letter format name,
+ever** — that is what makes `-o C:\out.json` unambiguous on Windows, and a
+future `-o c:report.csv` would break it silently.
+
+An "obvious" third branch — error on a format-shaped head that names nothing —
+was written, shipped and reverted in one session. It rejects `note:doc.json`, an
+ordinary relative filename, and **no syntactic rule can separate that from
+`nope:out.json`**; the two are structurally identical. So a mistyped format
+prefix with a valid extension writes a file of that literal name, which is
+principle 4 applied to argv: refusing a legitimate input is worse than accepting
+an odd one, and the odd one is loud anyway.
+
 
 ## Working practices that paid off
 
@@ -536,7 +730,9 @@ broken by an agent that had read the section and filed it under taste.
   precisely the person who wants to hear that its plumbing is broken. It is
   that in most responses this is noise, and the one audience it serves is
   someone deliberately trialling a policy — which is a switch on a tool, not a
-  default of the analysis engine. Revisit with the CLI, not before.
+  default of the analysis engine. The CLI now exists and reserves the switch as
+  `--include-report-only`, documented and unimplemented; that is the hook, and
+  the codes are still the work.
 - **`Set-Cookie` analysis** — `Secure`, `HttpOnly`, `SameSite=None` without
   `Secure`, and the `__Host-` / `__Secure-` prefix rules. Both blockers are now
   gone: the mapping supports repeated headers, and `identity()` means a code can
@@ -679,19 +875,55 @@ broken by an agent that had read the section and filed it under taste.
   `Cache-Control` prevents storage" condition against real directives rather
   than invented ones.
 - **Active checks** — Origin reflection is the highest-value CORS test and needs a
-  second request with a forged `Origin`. Tool work, not analysis.
+  second request with a forged `Origin`. Tool work, not analysis. The CLI
+  reserves `--probe LIST` for it, on `scan` rather than as its own verb,
+  because a probe run must produce the *same* document shape as a passive one —
+  a separate verb would invite a second shape and then every consumer needs two
+  parsers forever. An explicit list rather than a bare boolean, because a tool
+  that fires unusual traffic at someone's server should make you name what you
+  are firing.
 - **Inverted "interesting headers"** — report anything not on a *boring* list,
   rather than only known-interesting names. The human wants to compile their own
-  list, behind its own switch.
+  list, behind its own switch; the CLI reserves `--unknown-headers` for it.
 - **`request.py`** — request parsing/analysis, sharing `message.py`.
-- **The schema is not finished.** The shape in "The output schema" is settled;
-  what surrounds it is not. Open: a version field (needed *because* the `raw`
-  blobs invite archiving reports — a stored report from today and one from a
-  later shape are indistinguishable, and this is cheap now and awkward once
-  reports exist); how several results travel together, which the old tool did by
-  keying on URL and which should not come back that way; and whether run
-  metadata — tool name and version — belongs in the document at all. Decide
-  these together, before release, since all three change the top level.
+- **~~The schema is not finished~~ — ANSWERED 2026-08-21 by the CLI's run
+  envelope**, and answered without touching this library. A version field, run
+  metadata, and how several results travel together are all properties of the
+  *serialised artifact*, and `report()` returns a dict — so they belong to the
+  thing that writes files. See "The run envelope" under **The CLI**. One
+  consequence to know: a consumer calling `report()` directly and dumping it to
+  JSON has built its own artifact and owns its versioning; this package does not
+  stamp one into the dict.
+- **`--all-hops`, blocked on the analyser.** The CLI can analyse every hop of a
+  redirect chain and the envelope is specified for it, but it is reserved rather
+  than shipped, because a bare 301 currently produces **six warnings** —
+  `csp-missing`, `coop-missing`, `corp-missing`, `rp-missing`, `xcto-missing`,
+  `xfo-missing` — on a response that carries no representation for any of them
+  to protect. Measured, not guessed. That is principle 4, once per hop. The
+  cause is structural and already recorded: `analyze_all` sees no status line,
+  which is the same reason absent `Content-Type` is not reported. Closing it
+  means an optional status on `analyze_all()` — most naturally as part of the
+  TODO item *"change api to expect full request/response pairs first"*, which
+  brings the status line along with everything else. Note HSTS is correctly
+  *absent* from that list: on the https legs of a chain a redirect is precisely
+  where HSTS matters, so per-hop analysis is genuinely valuable and it is only
+  the representation-scoped headers that misfire.
+- **A public code-to-header table.** `explain` wants to say which header a code
+  belongs to and has no way to ask: the invariant is stated here and pinned by
+  `test_each_code_belongs_to_exactly_one_header`, but the mapping exists only
+  inside that test, reconstructed by running the corpus. Two fakes were rejected
+  — a table in `cli/` duplicates knowledge the analysers own and rots the first
+  time a code moves, and deriving the header from the code's prefix is a guess
+  dressed as a lookup. A declared `CODE_HEADER` would also make that test
+  stronger: today it can only prove the corpus is self-consistent, not that the
+  package agrees with it. Second consumer waiting: SARIF's `rules[]` wants a
+  rule's owning component.
+- **File input for the CLI** — `read` verb, Burp XML, HAR, SAZ, WCAT. The seam
+  is designed and the payload shape fixed (`cli/exchange.py`), deliberately with
+  no registry: every one of those formats is a multi-exchange container carrying
+  both request and response, so a source yields an *iterable* and one live
+  target yields a tuple of one. Getting the payload right was the commitment;
+  the registry is a few lines whenever the second source lands.
 
 ## Reference material on disk
 
@@ -1402,7 +1634,27 @@ Only the negatives that would otherwise look promising are kept:
 
 ## Status
 
-102 codes (39 error / 26 warning / 37 note), each with a rating and a message
-template, and every rendered sentence pinned by a snapshot. 357 tests, 166 test
-functions, all passing; `ruff check` clean. `pyproject.toml` is a placeholder — hatchling, no
-README yet, `hstspreload` declared as the optional `[preload]` extra.
+**Analyser:** 102 codes (39 error / 26 warning / 37 note), each with a rating and
+a message template, and every rendered sentence pinned by a snapshot.
+
+**CLI:** `hst` ships the `scan` and `explain` verbs over 10 modules in `cli/`,
+standard library only. Reserved and documented but not implemented: the `read`
+verb and its file parsers, `--probe`, `--all-hops`, `--include-report-only`,
+`--unknown-headers`, `--retry`, scope exclusions, `-d/--data`, and the `sarif`
+and `ndjson` output formats — the last two are *named* in `writers.RESERVED` so
+a user gets "not implemented yet" rather than "invalid choice", which is the
+whole of their implementation.
+
+**Tests:** 512 passing across 274 test functions, 108 of them CLI. `ruff check`
+clean. No test touches the network, with one deliberate exception: the redirect-
+limit test binds a loopback `http.server` on an ephemeral port, because urllib's
+own redirect bookkeeping cannot be tested any other way.
+
+`pyproject.toml` declares two console scripts (`hst` and `http-security-test`,
+both `http_security_test.cli:main`) and `hstspreload` as the optional
+`[preload]` extra. No runtime dependencies. Still no README.
+
+The CLI was built 2026-08-21 against
+`docs/designs/2026-08-21-cli-contract.md`; `docs/superpowers/plans/`
+`2026-08-21-cli-tool.md` is the implementation plan, corrected in five places
+during the build where it disagreed with the spec or with reality.
