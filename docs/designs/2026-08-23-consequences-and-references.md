@@ -31,6 +31,53 @@ analyser changes and no verdict moves.
 - **CVE.** Not parked, dropped. A CVE names a flaw in a specific product
   version. A misconfigured header has none, and attaching one would be false
   precision of exactly the kind principle 4 exists to stop.
+- **An operational-neglect signal.** Parked as a *second axis*, not as a ninth
+  slug — see below.
+
+### Parked: the hygiene axis
+
+A finding can say something about the *operator* rather than about an attacker:
+a header no browser has read since 2018 that nobody removed, a `Report-To` whose
+JSON does not parse, an RFC 1918 address left in a production CSP. None of that
+is risk, and all of it is evidence that nobody is tending the server — which is
+its own finding to a pentester, because the box that nobody tends is the box
+that gets owned three years later.
+
+The concept is legitimate and has a precedent in CWE's own prose: **CWE-477
+*Use of Obsolete Function*** describes itself as *"The code uses deprecated or
+obsolete functions, **which suggests that the code has not been actively
+reviewed or maintained**."* Same inference, different altitude.
+
+It is nonetheless **not** a consequence slug, for one reason that survived
+scrutiny and one that did not.
+
+- **It did not fail the CWE-693 test**, which was the expected objection.
+  Framed narrowly — *the operator wrote something that does not do what they
+  evidently intended* — it discriminates well: false for the deliberate opt-ins
+  (`acao-wildcard`, `corp-cross-origin`, whose messages say as much), false for
+  competent-but-constrained configurations (`csp-unsafe-inline` is usually a
+  legacy application, not neglect), true for `rt-invalid`, `hpkp-deprecated`
+  and `csp-ip-source`. It would turn "this finding has no consequence" into
+  "no consequence, *for a reason*", which is more than `()` says.
+- **It is a different axis, and that is disqualifying for a slug.** Every
+  consequence answers *what could an attacker achieve*. This answers *what does
+  this tell me about the operator*. In one list, `["xss", "stale-config"]`
+  conflates a capability with an inference, and every consumer triaging by risk
+  must filter one out forever. The right shape is a sibling field — `signals`
+  beside `consequences` — never another value in this one.
+
+**Why it waits.** The strong evidence is not in the headers analysed here. A
+missing semicolon is weak; `Server: Apache/2.2.15` and `X-Powered-By: PHP/5.3`
+are not. Those belong to the parked inverted *"interesting headers"* switch,
+where the material already surveyed for it lives — humble's 1 287-name
+`fingerprint.txt`, and `burp/burp-suite-software-version-checks`' 114-regex
+`match-rules.tab`, already recorded in CLAUDE.md as "the only one that extracts
+a *version* out of a value rather than just naming the product, so revisit it
+if the switch ever wants that". It wants that. Land the two together.
+
+Until then it is computable by a consumer and worth nothing more: a response
+whose findings all carry `consequences: []` is misconfigured and not dangerous,
+which is one line over data this design already produces.
 
 **Consequence of parking the long text: no new CLI flag.** Identifiers are
 cheap enough to emit unconditionally, so there is no verbosity switch, no
@@ -338,10 +385,18 @@ built once at import from three small collections, so a reader sees the sources
 of truth rather than 37 hand-written URLs:
 
 ```python
-_MDN      = (...)   # 29 names, URL from the MDN pattern
-_HTTP_DEV = (...)   #  5 names, URL from lower(name)
+_MDN      = (...)   # 30 names, URL from the MDN pattern
+_HTTP_DEV = (...)   #  7 names, URL from lower(name)
 _SPEC     = {...}   #  3 names -> a literal permanent URL
 ```
+
+**The header set is derived, not hand-listed.** It is the union of every header
+a finding can name and every header an inventory carries — **40** today: 35 from
+findings, 5 more (`Cache-Control`, `ETag`, `Expires`, `Last-Modified`, `Pragma`)
+that only ever appear in an inventory. An earlier draft of this document counted
+37 by assembling the set by hand from the canonical tuples, and silently omitted
+the report-only siblings. Rebuild it by running the corpus, the way
+`tests/test_headers.py` builds its code set, and never by typing out a list.
 
 Positive, not a pair of "headers MDN lacks" exclusion sets, and the direction
 matters: an exclusion set makes an unrecognised header fall through to the MDN
@@ -354,23 +409,24 @@ literally true, and because URLs have a different lifecycle from sentences.
 `catalog.py` says *`xss` is CWE-79*; `references.py` says *CWE-79 lives at this
 URL*.
 
-**MDN derivation, measured against BCD on 2026-08-23.** Of the **37 canonical
-headers this package analyses or inventories** (excluding the 91 information
-headers), **29 have an MDN page and all 29 sit at exactly**
+**MDN derivation, measured against BCD on 2026-08-23.** Of the **40 headers**
+above, **30 have an MDN page and all 30 sit at exactly**
 
 ```
 https://developer.mozilla.org/docs/Web/HTTP/Reference/Headers/<Canonical-Name>
 ```
 
 with **zero exceptions**, checked against `__compat.mdn_url` in
-`ref/documentation/browser-compat-data/http/headers/`. The other **eight have no
+`ref/documentation/browser-compat-data/http/headers/`. The other **ten have no
 MDN page at all**:
 
-`Feature-Policy`, `P3P`, `Public-Key-Pins`, `Public-Key-Pins-Report-Only`,
-`X-Content-Security-Policy`, `X-Download-Options`,
-`X-Permitted-Cross-Domain-Policies`, `X-WebKit-CSP`.
+`Cross-Origin-Embedder-Policy-Report-Only`,
+`Cross-Origin-Opener-Policy-Report-Only`, `Feature-Policy`, `P3P`,
+`Public-Key-Pins`, `Public-Key-Pins-Report-Only`, `X-Content-Security-Policy`,
+`X-Download-Options`, `X-Permitted-Cross-Domain-Policies`, `X-WebKit-CSP`.
 
-Every one is obsolete or never standardised, and `Feature-Policy`'s absence
+All but the two report-only siblings are obsolete or never standardised, and
+`Feature-Policy`'s absence
 independently corroborates the existing note that `w3c/browser-specs` does not
 carry it either.
 
@@ -381,7 +437,7 @@ perpetuity by written policy, MDN explicitly *redirects* a page when a header is
 superseded, and http.dev states no policy at all. MDN's redirect-on-deprecation
 is not hypothetical — it is exactly how `Feature-Policy` disappeared.
 
-**Three of the eight have an official permanent source**, verified on disk in
+**Three of the ten have an official permanent source**, verified on disk in
 `known-http-header-db`'s `specifications[]` and `rfc-library`:
 
 | header | source |
@@ -390,7 +446,8 @@ is not hypothetical — it is exactly how `Feature-Policy` disappeared.
 | `Public-Key-Pins-Report-Only` | RFC 7469, same document |
 | `P3P` | `https://www.w3.org/TR/P3P`, a W3C Recommendation nothing supersedes |
 
-**Five have no official source and never did.** `X-Content-Security-Policy` and
+**Seven have no official source.** Two are the COOP and COEP report-only
+siblings, documented by neither MDN nor a spec of their own. `X-Content-Security-Policy` and
 `X-WebKit-CSP` sit in the db with an empty `specifications[]` — vendor prefixes,
 never specified. `X-Download-Options` and `X-Permitted-Cross-Domain-Policies`
 are absent from all 271 entries. And `Feature-Policy`'s only listed
@@ -408,12 +465,13 @@ from the vendor links parked at the top of this document. The distinction to
 preserve is *permanence policy*, not *low count* — do not read this as licence
 to add a fourth link because the table is still short.
 
-**http.dev covers the remaining five, and the sources turn out to be exactly
+**http.dev covers the remaining seven, and the sources turn out to be exactly
 complementary.** Measured against `ref/documentation/http.dev` the same day:
-**36 of the 37 resolve at `https://http.dev/<lower(name)>`**, the sole miss
-being `Integrity-Policy` — which is one of MDN's 29. All eight of the headers
-above are covered, with real pages of 62-66 KB rather than stubs. So MDN first,
-http.dev second, and the union is **37/37 today**.
+**38 of the 40 resolve at `https://http.dev/<lower(name)>`**, the only misses
+being `Integrity-Policy` and `Integrity-Policy-Report-Only` — both of which MDN
+documents. All ten of the headers above are covered, with real pages of
+62-66 KB rather than stubs. So MDN first, then a permanent spec, then http.dev,
+and the union is **40/40 today**.
 
 Three things about that:
 
@@ -428,12 +486,12 @@ Three things about that:
   URLs here: a short reading list that does not rot.
 - **A noted exposure, decided rather than missed.** http.dev has no institution
   behind it, so its rot risk is higher than MDN's — acceptable, because after
-  the three official sources above the fallback set is five headers that no
-  standards body ever documented. And its pages carry "Baseline"
+  the three official sources above the fallback set is seven headers that no
+  standards body documents. And its pages carry "Baseline"
   banners rendered from web-features, which is BCD at second hand and which
   this project already refuses to cite for browser support. Linking the page as
   a *reference* does not breach that rule, but it does point a reader at
-  support claims made here from BCD directly. For five headers whose support
+  support claims made here from BCD directly. For seven headers whose support
   answer is "legacy or never", that is the cheapest such exposure available.
 
 `taxonomy_url()`: `https://cwe.mitre.org/data/definitions/<n>.html` and
