@@ -375,9 +375,27 @@ Decisions inside that shape, each with an alternative that was considered:
 ## 5. `references.py`, a new leaf
 
 ```
-findings, message, catalog, references  ->  (nothing)
-reporting  ->  response, findings, catalog, references
+message, catalog, references  ->  (nothing)
+findings   ->  catalog (lazily, inside taxonomy(); catalog imports nothing, so
+                this is not a cycle -- the import is deferred to keep catalog
+                free to import findings later)
+reporting  ->  response, findings, catalog
+cli.commands  ->  ... + CODE_HEADER, CONSEQUENCES, consequences, references, taxonomy
 ```
+
+**Corrected 2026-08-24.** This block originally read `findings, message,
+catalog, references -> (nothing)`, filing `findings.py` as a leaf outright. It
+is not one: `taxonomy()` imports `catalog` -- lazily, and with a comment that
+(also wrongly) called a module-scope import a cycle. It would not have been
+one either, since `catalog.py` imports nothing from this package; the real
+reason for the lazy import is to keep `catalog.py` free to import `findings.py`
+later. Both the code comment and this block were fixed in the same pass.
+
+**`reporting.py` does not import `references`, and that is the point.** An
+earlier draft of this block said it did — written before the decision below that
+the report carries identifiers and never URLs, and left stale when that decision
+landed. Nothing in the analyser resolves a link. `references.py` has exactly one
+consumer, `cli/commands.py`, which resolves on demand for a human reader.
 
 Exports `header_url(name)`, `taxonomy_url(id)`, and `HEADER_DOCS` — one
 **positive** name-to-URL table, with an unknown name resolving to `None`. It is

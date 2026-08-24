@@ -16,6 +16,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import re
+
 import pytest
 
 from http_security_test import FINDING_SEVERITY, MESSAGES
@@ -31,9 +33,13 @@ def test_explain_one_code_prints_its_level_and_template(capsys):
 
 
 def test_explain_with_no_arguments_lists_every_code(capsys):
+    # Each code's block is no longer exactly one line -- consequences and
+    # reference links can add more -- so the invariant worth pinning is the
+    # head line of each block: one per code, no more, no fewer.
     assert main(["explain"]) == 0
     out = capsys.readouterr().out
-    assert len(out.strip().splitlines()) == len(FINDING_SEVERITY)
+    listed = re.findall(r"^(\S+)\s+(?:error|warning|note)\s", out, re.MULTILINE)
+    assert listed == sorted(FINDING_SEVERITY)
     for code in FINDING_SEVERITY:
         assert code in out
 
@@ -55,6 +61,37 @@ def test_explain_reports_unknown_codes_and_still_prints_known_ones(capsys):
     captured = capsys.readouterr()
     assert "csp-unsafe-inline" in captured.out
     assert "no-such-code" in captured.err
+
+
+def test_explain_names_the_owning_header(capsys):
+    """The header must be in the head line, not merely somewhere in the output.
+
+    A prior version of this test asserted "Content-Security-Policy" in out,
+    which the MDN URL printed later in the entry
+    (.../Headers/Content-Security-Policy) also satisfies -- so deleting the
+    header from the head line's format string entirely still passed. Anchor
+    the assertion to the head line itself: code, level, header, in that order,
+    nothing after the header but whitespace.
+    """
+    main(["explain", "csp-unsafe-inline"])
+    out = capsys.readouterr().out
+    assert re.search(
+        r"^csp-unsafe-inline\s+error\s+Content-Security-Policy\s*$", out, re.MULTILINE
+    )
+
+
+def test_explain_lists_consequences_and_urls(capsys):
+    main(["explain", "csp-unsafe-inline"])
+    out = capsys.readouterr().out
+    assert "xss" in out
+    assert "https://cwe.mitre.org/data/definitions/79.html" in out
+    assert "developer.mozilla.org" in out
+
+
+def test_explain_says_nothing_about_consequences_when_there_are_none(capsys):
+    main(["explain", "rt-invalid"])
+    out = capsys.readouterr().out
+    assert "consequences" not in out
 
 
 def test_a_bare_target_is_a_usage_error_that_names_the_verb(capsys):

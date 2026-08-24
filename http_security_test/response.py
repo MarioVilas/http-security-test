@@ -126,6 +126,24 @@ CORS_HEADERS = (
 )
 
 
+# Two more on the same terms as REPORTING_HEADERS and CORS_HEADERS: analysed
+# when present, never reported absent, and therefore not in SECURITY_HEADERS.
+#
+# Clear-Site-Data is a logout instruction, so almost every response in the world
+# is right not to send one; an `csd-missing` finding would fire on all of them.
+# Integrity-Policy is the sharper case -- it is unambiguously a security header
+# and its absence really does mean subresources load without integrity metadata
+# -- but SECURITY_HEADERS is read three times, and the third read mints an
+# `ip-missing` that would fire on very nearly every site on the web. That is
+# principle 4, so the header is inventoried and not demanded.
+#
+# Both had findings and appeared in no inventory table at all, which is the
+# same oversight CORS_HEADERS closed on 2026-08-21 -- and worse here, because a
+# *correctly configured* Integrity-Policy produced no finding either, so the
+# response sent it and the report showed no trace of it anywhere.
+PRESENT_ONLY_HEADERS = ("Clear-Site-Data", "Integrity-Policy")
+
+
 # Headers a response may legally repeat, because repetition is defined for them
 # and means something. Every other header repeated is a response nobody
 # specified: the RFCs say what to do with a header that may recur, and nothing
@@ -1111,14 +1129,25 @@ def analyze_all(present, secure=True, host=None):
 def inventory(present):
     """What the response carries, before anything is judged about it.
 
-    Four tables, and the split between them is the point: `security` and
-    `missing` are two halves of one question -- with the one exception of
-    REPORTING_HEADERS, which is inventoried when present and never reported
-    absent, because configuring no reporting is not a defect -- `deprecated`
-    names headers whose
-    values are analysed elsewhere, and `information` and `caching` name headers
-    whose values are never analysed at all -- only a human can say whether a
-    particular `Server` banner is a leak.
+    Five tables, and the split between them is the point. `security` and
+    `missing` are two halves of one question -- with four exceptions, all
+    inventoried when present and never reported absent because their absence is
+    the ordinary state of the web rather than a gap: REPORTING_HEADERS,
+    CORS_HEADERS, PRESENT_ONLY_HEADERS and the report-only spellings. That is
+    also why none of the four is in SECURITY_HEADERS, which is read a third
+    time by _report_missing and would mint an `<initials>-missing` code firing
+    on nearly every site. `deprecated` names headers whose values are analysed
+    elsewhere, and `information` and `caching` name headers whose values are
+    never analysed at all -- only a human can say whether a particular `Server`
+    banner is a leak.
+
+    **`Content-Type` is deliberately in none of them**, and it is the only
+    header a finding can name that no table carries. It is analysed, for the
+    charset parameter alone, so `information` and `caching` cannot take it --
+    both mean "never analysed". And it is not a security header: OWASP's
+    250 000-domain corpus tracks 17 names and `content-type` is not among them.
+    A sixth key for it was designed and deferred; see CLAUDE.md for the trigger
+    that would earn one.
 
     Nothing here is withheld because of what it contains, which is why there is
     no `secure` argument. A plaintext response is still missing HSTS and this
@@ -1128,7 +1157,12 @@ def inventory(present):
     present = _normalize(present)
     return {
         "security": _filter_headers(
-            present, SECURITY_HEADERS + REPORTING_HEADERS + CORS_HEADERS
+            present,
+            SECURITY_HEADERS
+            + REPORTING_HEADERS
+            + CORS_HEADERS
+            + PRESENT_ONLY_HEADERS
+            + tuple(REPORT_ONLY_HEADERS),
         ),
         "missing": [name for name in SECURITY_HEADERS if name.lower() not in present],
         "deprecated": _filter_headers(present, DEPRECATED_HEADERS),

@@ -25,13 +25,14 @@ numbers, lists and dicts. The shape is:
       "response": {
         "findings": [
           {"header": ..., "code": ..., "level": ..., "data": {...},
-           "message": ...}
+           "consequences": [...], "message": ...}
         ],
         "inventory": {
           "security": {name: value}, "missing": [name],
           "deprecated": {name: value}, "information": {name: value},
           "caching": {name: value}
         },
+        "references": {"headers": [...], "taxonomy": [...]},
         "raw": "<base64>"
       },
       "request": {"raw": "<base64>"}
@@ -53,6 +54,17 @@ written out anyway: the common case is a reader who wants to sort by severity
 without also carrying the table. `data` is the machine-readable half of a
 finding and is always present, empty dict included, so a consumer never has to
 test for the key. `message` is the human half and can be left out entirely.
+
+The `references` block is the reading list for this response, as identifiers
+rather than links: a header name and a CWE identifier both resolve to a stable
+URL by pattern, and a name does not rot. `references.header_url()` and
+`taxonomy_url()` resolve them. It is fed by findings only, so a response with
+nothing wrong carries two empty lists. A response whose only finding is
+`duplicate-headers` is a second, narrower way to get an empty `headers` list
+despite carrying a finding: `CODE_HEADER["duplicate-headers"]` is `None`
+because that code is about the response, not about any one header, so it
+names no header for `references` to collect. Deliberate, not a bug -- see
+`CODE_HEADER`'s own comment in `findings.py`.
 
 The `raw` blobs are optional passthrough: this package never fetches anything,
 so they are whatever the caller hands over. Two things about them.
@@ -79,7 +91,14 @@ was never given is not.
 import base64
 
 from . import catalog
-from .findings import order_findings, severity
+from .findings import (
+    CODE_HEADER,
+    _identifier_sort_key,
+    consequences,
+    order_findings,
+    severity,
+    taxonomy,
+)
 from .response import analyze_all, inventory
 
 
@@ -104,10 +123,34 @@ def finding_as_dict(finding, message=True):
         "code": finding.code,
         "level": severity(finding.code),
         "data": dict(finding.data or {}),
+        # Always present, [] included, so a consumer never tests for the key.
+        # A hint about potential risk, never a claim the risk is reachable.
+        "consequences": list(consequences(finding.code)),
     }
     if message:
         row["message"] = catalog.describe(finding)
     return row
+
+
+def _references(findings):
+    """The reading list for one response: identifiers, never URLs.
+
+    Fed by findings only -- a header appears because something was said about
+    it. Header names come from CODE_HEADER rather than from the finding,
+    because a duplicate-headers finding carries the lowercased name it read out
+    of the mapping and every other finding carries canonical casing.
+    """
+    names, ids = set(), set()
+    for finding in findings:
+        declared = CODE_HEADER.get(finding.code)
+        if declared is not None:
+            names.add(declared)
+        ids.update(taxonomy(finding.code))
+    return {
+        "headers": sorted(names),
+        # By scheme then NUMERIC id: lexically, CWE-1021 sorts before CWE-79.
+        "taxonomy": sorted(ids, key=_identifier_sort_key),
+    }
 
 
 def report(present, secure=True, host=None, message=True, raw=None, request_raw=None):
@@ -125,6 +168,7 @@ def report(present, secure=True, host=None, message=True, raw=None, request_raw=
     response = {
         "findings": [finding_as_dict(f, message=message) for f in findings],
         "inventory": inventory(present),
+        "references": _references(findings),
     }
     if raw is not None:
         response["raw"] = _blob(raw)

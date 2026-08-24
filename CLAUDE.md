@@ -19,6 +19,7 @@ GPL-3.0-or-later. Every source file carries the notice.
 ```
 findings.py    Finding, identity(), FINDING_SEVERITY, SEVERITIES, severity(), order_findings()
 catalog.py     MESSAGES + describe(): every sentence the package can produce
+references.py  header and taxonomy URLs -- the only module whose exported data is a URL table
 message.py     the header mapping model: parse_headers, parse_raw_headers, lookups
 csp.py         Content-Security-Policy                      (largest module)
 hsts.py        Strict-Transport-Security + the ONLY third-party dependency
@@ -49,7 +50,10 @@ be ceremony. When the HAR parser lands, `har.py` sits beside `live.py`.
 Dependencies run one way and there are no cycles:
 
 ```
-findings, message, catalog  ->  (nothing)
+message, catalog, references  ->  (nothing)
+findings   ->  catalog (lazily, inside taxonomy(); catalog imports nothing, so
+                this is not a cycle -- the import is deferred to keep catalog
+                free to import findings later)
 csp, hsts, isolation, legacy, policies  ->  findings [, message]
 response   ->  all of the above except catalog
 reporting  ->  response, findings, catalog
@@ -60,7 +64,9 @@ cli.run      ->  cli.meta
 cli.text     ->  cli.exchange, cli.meta
 cli.writers  ->  cli.text
 cli.live     ->  cli.exchange, cli.scope, parse_headers
-cli.commands ->  all of the above + report(), FINDING_SEVERITY, MESSAGES, hsts
+cli.commands ->  all of the above + report(), FINDING_SEVERITY, MESSAGES,
+                  CODE_HEADER, CONSEQUENCES, consequences, references,
+                  taxonomy, hsts
 cli.options  ->  cli.commands, cli.meta
 cli.__init__ ->  cli.options
 ```
@@ -211,12 +217,15 @@ strings, numbers, lists, dicts, no encoder needed:
   "response": {
     "findings": [
       {"header": "Clear-Site-Data", "code": "csd-unquoted", "level": "error",
-       "data": {"members": ["cookies"]}, "message": "present but cookies is not…"}
+       "data": {"members": ["cookies"]}, "consequences": ["cache-exposure"],
+       "message": "present but cookies is not…"}
     ],
     "inventory": {
       "security": {}, "missing": [], "deprecated": {}, "information": {},
       "caching": {}
     },
+    "references": {"headers": ["Clear-Site-Data"],
+                    "taxonomy": ["CAPEC-204", "CWE-525"]},
     "raw": "<base64>"
   },
   "request": {"raw": "<base64>"}
@@ -247,25 +256,68 @@ Decisions inside that shape, each of which had an alternative:
   key. `message` can be dropped entirely with `message=False`.
 - **`inventory()` takes no `secure`.** Principle 2: nothing is withheld from an
   inventory. HSTS is missing on a plaintext response and the inventory says so.
-- **`security` and `missing` are two halves of one question, with two
-  exceptions.** `REPORTING_HEADERS` (`Report-To`, `Reporting-Endpoints`) and
-  `CORS_HEADERS` (the six response-side `Access-Control-*`) are inventoried
-  under `security` when present and are **never** reported absent, because a
-  response that configures no reporting — or shares nothing across origins — is
-  the ordinary state of the web rather than a gap. This is why they are not in
-  `SECURITY_HEADERS`: that
+- **`security` and `missing` are two halves of one question, with four
+  exceptions.** `REPORTING_HEADERS` (`Report-To`, `Reporting-Endpoints`),
+  `CORS_HEADERS` (the six response-side `Access-Control-*`),
+  `PRESENT_ONLY_HEADERS` (`Clear-Site-Data`, `Integrity-Policy`) and the four
+  `REPORT_ONLY_HEADERS` keys are inventoried under `security` when present and
+  are **never** reported absent, because a response that configures no
+  reporting, shares nothing across origins, is not a logout endpoint, or is not
+  trialling a policy is the ordinary state of the web rather than a gap. This
+  is why none of them is in `SECURITY_HEADERS`: that
   tuple is read three times — for `security`, for `missing`, and by
   `_report_missing()` — and only the first is wanted here. Adding a header
   there to get it inventoried mints an `<initials>-missing` code that fires on
   nearly every site; the bijection tests catch it, but the design should not
-  need saving by them. The CORS table was added on 2026-08-21 and closed a
+  need saving by them. **`Integrity-Policy` is the sharp case**: it is
+  unambiguously a security header and its absence really does mean subresources
+  load unverified, but demanding it would fire on nearly the whole web, so it
+  is inventoried and not demanded. Mutation-checked — moving it into
+  `SECURITY_HEADERS` fails 53 tests.
+  The CORS table was added on 2026-08-21 and closed a
   plain oversight: `Access-Control-Allow-Origin` had findings but appeared in
   no inventory at all, so a response sharing itself with credentials to an
-  arbitrary origin showed five empty tables.
+  arbitrary origin showed five empty tables. **The other two tables closed the
+  same oversight on 2026-08-24**, and worse: a *correctly configured*
+  `Integrity-Policy` raised no finding either, so the response sent it and the
+  report showed no trace of it anywhere — a reader could not tell it from a
+  response that never sent the header.
+- **`Content-Type` is in no inventory table, deliberately, and is the only
+  header a finding can name that none carries.** It is analysed, for the
+  charset parameter alone, so `information` and `caching` cannot take it —
+  both mean *never analysed*. And it is not a security header: OWASP's
+  250 000-domain corpus tracks 17 names and `content-type` is **not among
+  them**, which is an independent check rather than an opinion. A sixth
+  inventory key for it was designed on 2026-08-24 and deferred, because one
+  member is ceremony by this project's own three-implementations rule. **The
+  trigger: a second analysed-but-not-security header.** `Vary` is the nearest
+  parked candidate. Until then the gap is one header's value, recorded here so
+  it reads as a decision rather than the oversight it looks like.
 - **Absent beats empty for passthrough.** No blob, no `raw` key; nothing known
   about the request, no `request` key. The rule that reconciles this with `data`
   always being `{}`: content this package *derived* is always present, content
   it was merely *given* is present only if it was given.
+- **`consequences` is per finding, `[]` included, the same rule as `data`.** A
+  hint about potential risk, never a claim it is reachable — every entry's
+  wording says so — so a consumer filtering by risk never has to test for the
+  key, and a finding with nothing to say has said so explicitly rather than by
+  omission.
+- **`references` is one key per response, not scattered through `findings[]`
+  and the inventories.** Scattering puts the same MDN entry in six places and
+  forces every consumer to merge six lists forever — the argument that already
+  killed a top-level `findings` key. It carries identifiers, not URLs: a header
+  name and a CWE id do not rot, a link does, and both resolve to a stable URL by
+  pattern through `references.header_url()` and `taxonomy_url()`. Storing five
+  links per header was the first design and is exactly the curated-data-ages
+  problem that keeps `references.py` down to three curated exceptions. It is
+  **fed by findings only** — a header earns its place because something was
+  said about it, `-missing` codes included — so a flawless response gets two
+  empty lists, which reads as "nothing to read" rather than as an omission, and
+  one result cut out of a multi-target run stays self-contained. `headers` is
+  canonicalised through `CODE_HEADER` rather than read off the finding, because
+  a `duplicate-headers` finding alone carries a lowercased name. `taxonomy` is
+  deduped and sorted by scheme then **numeric** id, not lexically, or
+  `CWE-1021` sorts before `CWE-79`.
 
 The `raw` blobs are optional and the analyser never fetches anything, so they
 are whatever the caller hands over — `cli/live.py` is what supplies them for a
@@ -720,6 +772,40 @@ broken by an agent that had read the section and filed it under taste.
   caniuse.com, which renders BCD and is not the same as the caniuse checkout.
   Deliberately *not* a code: it would fire on every correct policy that asks
   for reports. `ip-endpoints-undefined` is the finding worth having.
+- **The consequence vocabulary is the slug; a taxonomy id is an attribute of
+  it, never the vocabulary itself.** Measured against CWE 4.20 (969
+  weaknesses) and CAPEC 2.1 on 2026-08-23: there is no weakness at all for MIME
+  sniffing — zero hits across "MIME", "Content-Type" and "sniff" — none for
+  XS-Leaks, and nothing written for permission *delegation* either, since every
+  permission CWE is scoped to filesystem or OS permissions and CWE-732 fits
+  `permission-abuse` only because its Class-level wording is resource-agnostic
+  while its examples are not. Had CWE ids been the vocabulary itself, a
+  quarter of the eight slugs would have had no id, or a forced one. Do not
+  re-propose CWE ids as the consequence names for this reason.
+- **A Pillar-level CWE is not a usable fallback for a gap.** CWE-693
+  *Protection Mechanism Failure* and CWE-284 *Improper Access Control* were
+  both tried for the slug that initially lacked a better id, and both fail the
+  same test: a broader id is honest only if it would still be chosen when a
+  narrower one already existed. CWE-693's Pillar-level wording — "does not use
+  or incorrectly uses a protection mechanism that provides sufficient defense
+  against directed attacks" — is true of every finding this package emits,
+  `xss` and `clickjacking` included, so pinning it to the one slug that lacked
+  something better would stop it naming a class of harm and start meaning
+  "unclassified". `permission-abuse` took CWE-732 *Incorrect Permission
+  Assignment for Critical Resource* instead, which is not true of the other
+  seven slugs.
+- **Pick a CAPEC id by its CWE cross-reference, not by its name.** Keyword
+  matching against CAPEC's pattern names was wrong three times out of about a
+  dozen during this design — CAPEC-468 *Generic Cross-Browser Cross-Domain
+  Theft* reads like `cors-data-theft` and is CSS-injection data theft instead.
+  The join that catches it is CAPEC's own `external_references`, filtered to
+  `source_name == "cwe"`, asking which patterns cross-reference the CWE already
+  chosen for the slug — that is how CAPEC-103 was confirmed for `clickjacking`
+  and how CAPEC-468 was eliminated.
+- **CWE's cookie coverage is unusually rich** — 1004 (`HttpOnly`), 1275
+  (`SameSite`), 614 (`Secure`), 315, 539, 565, 784 — which maps almost
+  one-to-one onto the parked `Set-Cookie` prefix work below. Reach for it
+  first when that item lands rather than starting the CWE search from zero.
 
 ## Parked, with intent to do
 
@@ -885,6 +971,29 @@ broken by an agent that had read the section and filed it under taste.
 - **Inverted "interesting headers"** — report anything not on a *boring* list,
   rather than only known-interesting names. The human wants to compile their own
   list, behind its own switch; the CLI reserves `--unknown-headers` for it.
+- **A hygiene axis, sibling to `consequences` rather than a ninth slug.** A
+  finding can say something about the *operator* rather than about an
+  attacker — a header no browser has read since 2018 that nobody removed, a
+  `Report-To` whose JSON does not parse, an RFC 1918 address left in a
+  production CSP — and CWE's own prose has a precedent for that inference:
+  CWE-477 *Use of Obsolete Function* describes itself as suggesting "the code
+  has not been actively reviewed or maintained." It survived the expected
+  CWE-693 objection: framed narrowly as *the operator wrote something that
+  does not do what they evidently intended*, it discriminates well — false for
+  the deliberate opt-ins (`acao-wildcard`, `corp-cross-origin`, whose messages
+  say as much), false for competent-but-constrained configurations
+  (`csp-unsafe-inline` is usually a legacy application, not neglect), true for
+  `rt-invalid`, `hpkp-deprecated` and `csp-ip-source`. What disqualifies it as
+  a ninth slug is the axis, not the discrimination: every consequence answers
+  *what could an attacker achieve*, this answers *what does this tell me about
+  the operator*, and mixing a capability with an inference in one list would
+  force every consumer triaging by risk to filter one back out forever. It
+  waits because the strong evidence is not in the headers analysed here —
+  `Server: Apache/2.2.15` and `X-Powered-By: PHP/5.3` are, and those belong to
+  the parked inverted *"interesting headers"* switch above, where humble's
+  1 287-name `fingerprint.txt` and `burp/burp-suite-software-version-checks`'
+  114-regex `match-rules.tab`, already surveyed for that switch, are the
+  material to build it from. Land the two together.
 - **`request.py`** — request parsing/analysis, sharing `message.py`.
 - **~~The schema is not finished~~ — ANSWERED 2026-08-21 by the CLI's run
   envelope**, and answered without touching this library. A version field, run
@@ -908,16 +1017,6 @@ broken by an agent that had read the section and filed it under taste.
   *absent* from that list: on the https legs of a chain a redirect is precisely
   where HSTS matters, so per-hop analysis is genuinely valuable and it is only
   the representation-scoped headers that misfire.
-- **A public code-to-header table.** `explain` wants to say which header a code
-  belongs to and has no way to ask: the invariant is stated here and pinned by
-  `test_each_code_belongs_to_exactly_one_header`, but the mapping exists only
-  inside that test, reconstructed by running the corpus. Two fakes were rejected
-  — a table in `cli/` duplicates knowledge the analysers own and rots the first
-  time a code moves, and deriving the header from the code's prefix is a guess
-  dressed as a lookup. A declared `CODE_HEADER` would also make that test
-  stronger: today it can only prove the corpus is self-consistent, not that the
-  package agrees with it. Second consumer waiting: SARIF's `rules[]` wants a
-  rule's owning component.
 - **File input for the CLI** — `read` verb, Burp XML, HAR, SAZ, WCAT. The seam
   is designed and the payload shape fixed (`cli/exchange.py`), deliberately with
   no registry: every one of those formats is a multi-exchange container carrying
@@ -1585,6 +1684,15 @@ exercise `export.sh`, it is not maintained and is expected to be deleted, and
 reading it as an inventory would under-report the tree by 70 repositories. When
 the mtime is ambiguous, ask rather than re-survey 153 repositories.
 
+**CAPEC and CWE, since the taxonomy work above cites specific versions of
+both and a blanket negative here would otherwise say neither is available.**
+CAPEC 2.1 is on disk and in the whitelist above, at
+`documentation/cti/capec/2.1/stix-capec.json`. CWE is not in
+`/home/crapula/ref` at all — no reliable upstream repository of it was found —
+so CWE 4.20 lives as a gitignored scratch download in this project's own tree,
+`tmp/cwec_v4.20.xml`, which this section's read-only rule does not govern
+because it was never part of the reference tree.
+
 Only the negatives that would otherwise look promising are kept:
 
 - **`operating_systems/*`** — nothing about HTTP security headers.
@@ -1634,8 +1742,19 @@ Only the negatives that would otherwise look promising are kept:
 
 ## Status
 
-**Analyser:** 102 codes (39 error / 26 warning / 37 note), each with a rating and
-a message template, and every rendered sentence pinned by a snapshot.
+**Analyser:** 102 codes (39 error / 26 warning / 37 note), each with a rating, a
+message template, a declared header and a consequence tuple — 61 codes carry at
+least one consequence slug, 41 carry `()`. Every rendered sentence is pinned by
+a snapshot. `CODE_HEADER` closes the parked code-to-header table:
+`test_the_declared_header_is_the_header_the_finding_carries` is what makes it
+stronger than the test it replaced, which could only prove the corpus was
+self-consistent — this one proves the package agrees with it.
+Eight consequence slugs live in `catalog.CONSEQUENCES`, a ten-entry
+`CODE_TAXONOMY` overlays specific published ids onto a handful of codes, and
+`references.py` resolves all 40 headers a finding names, plus the security,
+deprecated and caching inventories — 30 of them via MDN, 3 via a permanent
+spec URL, 7 via http.dev. That is deliberately narrower than "or an inventory
+can name": `information` alone names 91 headers and none of them resolve.
 
 **CLI:** `hst` ships the `scan` and `explain` verbs over 10 modules in `cli/`,
 standard library only. Reserved and documented but not implemented: the `read`
@@ -1643,16 +1762,22 @@ verb and its file parsers, `--probe`, `--all-hops`, `--include-report-only`,
 `--unknown-headers`, `--retry`, scope exclusions, `-d/--data`, and the `sarif`
 and `ndjson` output formats — the last two are *named* in `writers.RESERVED` so
 a user gets "not implemented yet" rather than "invalid choice", which is the
-whole of their implementation.
+whole of their implementation. Consequences and taxonomy references took **no
+new flag**: identifiers are cheap enough to emit unconditionally, and parking
+the long-form descriptions to land with the SARIF writer's `fullDescription`
+field removed the only thing a verbosity switch would have gated — do not
+reserve one now.
 
-**Tests:** 512 passing across 274 test functions, 108 of them CLI. `ruff check`
+**Tests:** 555 passing across 317 test functions, 114 of them CLI. `ruff check`
 clean. No test touches the network, with one deliberate exception: the redirect-
 limit test binds a loopback `http.server` on an ephemeral port, because urllib's
 own redirect bookkeeping cannot be tested any other way.
 
 `pyproject.toml` declares two console scripts (`hst` and `http-security-test`,
 both `http_security_test.cli:main`) and `hstspreload` as the optional
-`[preload]` extra. No runtime dependencies. Still no README.
+`[preload]` extra. No runtime dependencies. `README.md` landed in `01121ce`, a
+five-line placeholder that says as much ("work in progress, stay tuned") —
+still no real one.
 
 The CLI was built 2026-08-21 against
 `docs/designs/2026-08-21-cli-contract.md`; `docs/superpowers/plans/`

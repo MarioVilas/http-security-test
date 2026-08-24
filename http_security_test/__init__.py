@@ -32,19 +32,25 @@ one into a sentence from the catalog. A consumer that would rather write its own
 wording, or none, can read `data` and ignore the catalog entirely.
 """
 
-from .catalog import MESSAGES, describe
+from .catalog import CONSEQUENCES, MESSAGES, Consequence, describe
 from .csp import parse_csp
 from .findings import (
+    CODE_CONSEQUENCES,
+    CODE_HEADER,
+    CODE_TAXONOMY,
     FINDING_SEVERITY,
     SEVERITIES,
     Finding,
+    consequences,
     identity,
     order_findings,
     severity,
+    taxonomy,
 )
 from .legacy import DEPRECATED_HEADERS
 from .message import parse_headers, parse_raw_headers
 from .policies import parse_feature_policy, parse_permissions_policy
+from .references import HEADER_DOCS, header_url, taxonomy_url
 from .reporting import finding_as_dict, report
 from .response import (
     CACHE_HEADERS,
@@ -57,17 +63,25 @@ from .response import (
 
 __all__ = [
     "CACHE_HEADERS",
+    "CODE_CONSEQUENCES",
+    "CODE_HEADER",
+    "CODE_TAXONOMY",
+    "CONSEQUENCES",
     "DEPRECATED_HEADERS",
     "FINDING_SEVERITY",
+    "HEADER_DOCS",
     "INFORMATION_HEADERS",
     "MESSAGES",
     "SECURITY_HEADERS",
     "SEVERITIES",
+    "Consequence",
     "Finding",
     "analyze",
     "analyze_all",
+    "consequences",
     "describe",
     "finding_as_dict",
+    "header_url",
     "identity",
     "inventory",
     "order_findings",
@@ -78,4 +92,6 @@ __all__ = [
     "parse_raw_headers",
     "report",
     "severity",
+    "taxonomy",
+    "taxonomy_url",
 ]

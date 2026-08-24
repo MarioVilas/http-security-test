@@ -25,7 +25,7 @@ from unittest import mock
 import pytest
 
 import http_security_test as headers
-from http_security_test import hsts, policies
+from http_security_test import hsts, policies, references
 
 # ---------------------------------------------------------------------------
 # Per-header analyzers
@@ -699,15 +699,6 @@ def test_the_header_tables_do_not_overlap():
 
 
 # ---------------------------------------------------------------------------
-# Invariants the JSON schema relies on
-# ---------------------------------------------------------------------------
-# findings is {severity: [code, ...]} with no header key. That is lossless only
-# while a code identifies exactly one header and cannot repeat within a response.
-
-EVERY_VALUE = [(name, value) for name, value, _ in ANALYZER_CASES]
-
-
-# ---------------------------------------------------------------------------
 # Cross-origin isolation
 # ---------------------------------------------------------------------------
 # COOP and COEP only buy cross-origin isolation together, so neither is judged
@@ -774,19 +765,36 @@ def test_hardening_coop_adds_nothing_but_the_isolation_hint():
     assert not weaker - stronger
 
 
-def test_each_code_belongs_to_exactly_one_header():
-    owners = {}
-    for name, value in EVERY_VALUE:
-        for finding in headers.analyze(name, value):
-            owners.setdefault(finding.code, set()).add(finding.header)
-    for finding in headers.analyze_all({}):
-        owners.setdefault(finding.code, set()).add(finding.header)
-    # duplicate-headers is the one code a response can raise against more than
-    # one header, since any header may be repeated. Each Finding still names its
-    # own header; it is only a code-keyed view of them that cannot tell apart.
-    owners.pop("duplicate-headers", None)
-    ambiguous = {code: owner for code, owner in owners.items() if len(owner) > 1}
-    assert ambiguous == {}
+def test_every_emittable_code_declares_a_header():
+    assert _every_code_headers_can_emit() <= set(headers.CODE_HEADER)
+
+
+def test_no_header_is_declared_for_a_code_that_cannot_be_emitted():
+    assert set(headers.CODE_HEADER) <= _every_code_headers_can_emit()
+
+
+def test_the_declared_header_is_the_header_the_finding_carries():
+    """The upgrade over the old test.
+
+    The old one asked only whether the corpus disagreed with itself. This asks
+    whether the declared table matches what analysis actually emits, which is
+    the failure a moved code would cause. Compared case-insensitively because
+    duplicate-headers findings carry a lowercased name -- see the exemption
+    below, which is about the *code*, not the casing.
+    """
+    for finding in _every_finding_headers_can_emit():
+        if finding.code == "duplicate-headers":
+            continue  # any header may repeat; the code names no single owner
+        declared = headers.CODE_HEADER[finding.code]
+        assert declared is not None, finding.code
+        assert declared.lower() == finding.header.lower(), finding.code
+
+
+def test_duplicate_headers_declares_no_header():
+    # None rather than absence, so the table stays total over codes and the
+    # two bijection tests above cannot pass by skipping it.
+    assert "duplicate-headers" in headers.CODE_HEADER
+    assert headers.CODE_HEADER["duplicate-headers"] is None
 
 
 def test_a_response_never_emits_the_same_code_twice():
@@ -974,7 +982,7 @@ def test_the_two_sides_are_nested_so_a_header_name_is_never_ambiguous():
     # are analysed a bare "header" field could not say which one it meant.
     out = headers.report(RESPONSE)
     assert set(out) == {"response"}
-    assert set(out["response"]) == {"findings", "inventory"}
+    assert set(out["response"]) == {"findings", "inventory", "references"}
 
 
 def test_a_finding_row_carries_its_level_and_data():
@@ -988,6 +996,7 @@ def test_a_finding_row_carries_its_level_and_data():
         "code": "xfo-invalid",
         "level": "error",
         "data": {"value": "ALLOWALL"},
+        "consequences": ["clickjacking"],
         "message": headers.describe(headers.Finding(
             "X-Frame-Options", "xfo-invalid", {"value": "ALLOWALL"}
         )),
@@ -1023,7 +1032,7 @@ def test_one_code_may_appear_twice_in_a_report():
     assert [r["data"]["value"] for r in invalid] == ["ALLOWALL", "NONSENSE"]
 
 
-def test_the_report_carries_all_four_inventories():
+def test_the_report_carries_every_inventory():
     assert set(headers.report(RESPONSE)["response"]["inventory"]) == {
         "security",
         "missing",
@@ -1031,6 +1040,82 @@ def test_the_report_carries_all_four_inventories():
         "information",
         "caching",
     }
+
+
+def test_a_finding_carries_its_consequences():
+    present = headers.parse_headers([("Content-Security-Policy", "script-src 'unsafe-inline'")])
+    doc = headers.report(present)
+    row = next(f for f in doc["response"]["findings"] if f["code"] == "csp-unsafe-inline")
+    assert row["consequences"] == ["xss"]
+
+
+def test_consequences_are_always_present_even_when_empty():
+    # The `data` rule: content this package derived is always there, so a
+    # consumer never has to test for the key.
+    present = headers.parse_headers([("Report-To", "not json")])
+    doc = headers.report(present)
+    row = next(f for f in doc["response"]["findings"] if f["code"] == "rt-invalid")
+    assert row["consequences"] == []
+
+
+def test_the_references_block_collects_headers_and_taxonomy():
+    present = headers.parse_headers([("X-Frame-Options", "ALLOWALL")])
+    block = headers.report(present)["response"]["references"]
+    assert "X-Frame-Options" in block["headers"]
+    assert "CWE-1021" in block["taxonomy"]
+    assert "CAPEC-222" in block["taxonomy"]
+
+
+def test_the_references_block_is_deduped_and_sorted_numerically():
+    present = headers.parse_headers([("X-Frame-Options", "ALLOWALL")])
+    block = headers.report(present)["response"]["references"]
+    assert block["headers"] == sorted(set(block["headers"]))
+    # CWE-1021 after CWE-79: by scheme then numeric id, not lexically.
+    cwes = [i for i in block["taxonomy"] if i.startswith("CWE-")]
+    assert cwes == sorted(cwes, key=lambda i: int(i.split("-")[1]))
+
+
+def test_the_references_headers_are_canonical_not_lowercased():
+    """The block must read the name from CODE_HEADER, never off the finding.
+
+    duplicate-headers is the one finding that carries a lowercased header
+    name -- read straight out of the header mapping -- while every other
+    finding carries canonical casing. An implementation that sources names
+    from `finding.header` instead of `CODE_HEADER` gets every ordinary case
+    right and only breaks on duplicate-headers, where it emits a lowercased
+    name that `header_url()` cannot resolve. A prior version of this test used
+    a two-value X-Frame-Options case (one invalid value alongside a valid one)
+    to force a duplicate-headers finding to appear beside an xfo-invalid one,
+    but its assertion checked the block for the *xfo-invalid* finding's name
+    -- which is canonical under both implementations -- so it could not tell
+    the two apart. This constructs the discriminating case directly: a single
+    finding whose header is already lowercased, exactly as duplicate-headers
+    findings are built.
+    """
+    from http_security_test.reporting import _references
+
+    block = _references([headers.Finding("x-frame-options", "xfo-missing", {})])
+    assert block["headers"] == ["X-Frame-Options"]
+
+
+def test_references_is_fed_by_findings_only():
+    """The block follows the findings, not the inventory, and they differ.
+
+    Cross-Origin-Embedder-Policy is missing from this response and the
+    inventory says so -- but coep-missing is suppressed unless COOP asks for
+    isolation, so no finding names it and it must not reach the reading list.
+    An implementation sourcing names from inventory()["missing"] passes every
+    other test in this file and fails this one.
+    """
+    present = headers.parse_headers([("X-Frame-Options", "ALLOWALL")])
+    document = headers.report(present)
+    block = document["response"]["references"]
+    inventory_missing = document["response"]["inventory"]["missing"]
+    assert "Cross-Origin-Embedder-Policy" in inventory_missing
+    assert "Cross-Origin-Embedder-Policy" not in block["headers"]
+    # ...and every name that IS there was named by a finding
+    named = {headers.CODE_HEADER[f["code"]] for f in document["response"]["findings"]}
+    assert set(block["headers"]) == named - {None}
 
 
 # ---------------------------------------------------------------------------
@@ -1252,6 +1337,140 @@ def test_order_findings_keeps_equal_severities_in_emission_order():
     ]
     ordered = headers.order_findings(findings)
     assert [f.code for f in ordered] == ["csp-no-base-uri", "csp-no-object-src"]
+
+
+# ---------------------------------------------------------------------------
+# Consequences
+# ---------------------------------------------------------------------------
+# Two tables and three invariants. The severities and the message templates are
+# both bijections with the emittable codes; these are held to the same standard,
+# because a code with no entry would silently report no risk at all.
+
+
+def test_every_emittable_code_declares_consequences():
+    assert _every_code_headers_can_emit() <= set(headers.CODE_CONSEQUENCES)
+
+
+def test_no_consequences_are_declared_for_a_code_that_cannot_be_emitted():
+    assert set(headers.CODE_CONSEQUENCES) <= _every_code_headers_can_emit()
+
+
+def test_every_slug_a_code_names_is_defined():
+    named = {s for slugs in headers.CODE_CONSEQUENCES.values() for s in slugs}
+    assert named <= set(headers.CONSEQUENCES)
+
+
+def test_every_defined_slug_is_named_by_some_code():
+    # Without this the vocabulary could grow entries nothing ever emits, which
+    # is how a catalogue rots: the table looks maintained and half of it is dead.
+    named = {s for slugs in headers.CODE_CONSEQUENCES.values() for s in slugs}
+    assert set(headers.CONSEQUENCES) <= named
+
+
+def test_consequences_are_tuples_not_sets():
+    # A set literal reorders per process and makes output nondeterministic.
+    for code, slugs in headers.CODE_CONSEQUENCES.items():
+        assert isinstance(slugs, tuple), code
+    for slug, entry in headers.CONSEQUENCES.items():
+        assert isinstance(entry.taxonomy, tuple), slug
+
+
+def test_every_taxonomy_identifier_resolves():
+    for slug, entry in headers.CONSEQUENCES.items():
+        for identifier in entry.taxonomy:
+            assert references.taxonomy_url(identifier) is not None, (slug, identifier)
+
+
+CONSEQUENCES_SNAPSHOT = pathlib.Path(__file__).parent / "rendered_consequences.txt"
+
+
+def _rendered_consequences():
+    """Every consequence entry's slug, name and text, sorted by slug.
+
+    Unlike the message snapshot this needs no corpus to drive it: CONSEQUENCES
+    is a fixed table and every entry renders unconditionally, so it is one row
+    per slug rather than one row per distinct rendering.
+    """
+    rows = {
+        "%s\t%s\t%s" % (slug, entry.name, entry.text)
+        for slug, entry in headers.CONSEQUENCES.items()
+    }
+    return "".join(line + "\n" for line in sorted(rows))
+
+
+def test_rendered_consequences_match_the_snapshot():
+    """The wording of every consequence entry, pinned.
+
+    catalog.CONSEQUENCES is prose that nothing else reads: no analysis
+    changes and no test about codes or slugs fails if a `.text` or `.name` is
+    edited by accident, so the sentence `hst explain` prints is quietly
+    different and nothing on this side notices. This is the same guard
+    `test_rendered_messages_match_the_snapshot` is, aimed at the other prose
+    table -- CONSEQUENCES grew eight entries in this branch with no snapshot
+    of its own until now.
+
+    Regenerate deliberately, never to make a red test green:
+
+        UPDATE_CONSEQUENCES_SNAPSHOT=1 python -m pytest tests/ -k rendered_consequences
+
+    then read the diff before keeping it.
+    """
+    current = _rendered_consequences()
+    if os.environ.get("UPDATE_CONSEQUENCES_SNAPSHOT"):
+        CONSEQUENCES_SNAPSHOT.write_text(current)
+    assert current == CONSEQUENCES_SNAPSHOT.read_text()
+
+
+def test_the_consequences_snapshot_covers_every_slug():
+    # Without this the snapshot could pin three entries and pass forever.
+    pinned = {
+        line.split("\t")[0] for line in CONSEQUENCES_SNAPSHOT.read_text().splitlines()
+    }
+    assert pinned == set(headers.CONSEQUENCES)
+
+
+# ---------------------------------------------------------------------------
+# The CODE_TAXONOMY overlay
+# ---------------------------------------------------------------------------
+# A sparse table on top of the consequence slugs' own taxonomy: a specific
+# published identifier, where one describes a code better than its slug's
+# general classification does. taxonomy() unions the two, and the overlay is
+# deliberately not a bijection with the emittable codes.
+
+
+def test_the_overlay_adds_to_a_slug_rather_than_replacing_it():
+    # Union, never replace. Adding precision must not delete the general
+    # classification: CAPEC-209 is a Detailed pattern beneath CAPEC-63.
+    ids = headers.taxonomy("xcto-missing")
+    assert "CAPEC-209" in ids
+    assert "CWE-79" in ids and "CAPEC-63" in ids
+
+
+def test_a_code_with_no_overlay_entry_inherits_its_slugs():
+    assert headers.taxonomy("csp-unsafe-inline") == ("CAPEC-63", "CWE-79")
+
+
+def test_a_code_with_no_consequence_has_no_taxonomy():
+    assert headers.taxonomy("rt-invalid") == ()
+
+
+def test_taxonomy_is_sorted_by_scheme_then_numeric_id():
+    # Not lexically, or CWE-1021 sorts before CWE-79.
+    assert headers.taxonomy("xfo-missing") == ("CAPEC-103", "CAPEC-222", "CWE-1021")
+
+
+def test_the_overlay_is_partial_and_only_checked_one_way():
+    """The one deliberately non-bijective table in the package.
+
+    An absent entry means "no better id was found", not "none exists", so
+    completeness is not a property it claims. Do not make this symmetrical by
+    minting 102 curated entries to satisfy a test.
+    """
+    assert set(headers.CODE_TAXONOMY) <= _every_code_headers_can_emit()
+    for code, ids in headers.CODE_TAXONOMY.items():
+        assert isinstance(ids, tuple), code
+        for identifier in ids:
+            assert references.taxonomy_url(identifier) is not None, (code, identifier)
 
 
 # ---------------------------------------------------------------------------
@@ -1839,6 +2058,87 @@ def test_reporting_endpoints_is_never_reported_missing():
     inventory = headers.inventory({})
     assert "Reporting-Endpoints" not in inventory["missing"]
     assert not [f for f in headers.analyze_all({}) if f.header == "Reporting-Endpoints"]
+
+
+# ---------------------------------------------------------------------------
+# Analysed but never demanded
+# ---------------------------------------------------------------------------
+# Six headers that had findings and appeared in no inventory table at all --
+# the same oversight CORS_HEADERS closed on 2026-08-21, and worse, because a
+# *correctly configured* Integrity-Policy raises no finding either, so the
+# response sent it and the report showed no trace of it anywhere. They are
+# inventoried on the reporting/CORS terms: visible when present, never reported
+# absent, and out of SECURITY_HEADERS so no `-missing` code is minted.
+
+PRESENT_ONLY_RESPONSE = {
+    "clear-site-data": '"cookies"',
+    "integrity-policy": "blocked-destinations=(script)",
+    "content-security-policy-report-only": "default-src 'none'",
+    "cross-origin-opener-policy-report-only": "same-origin",
+    "cross-origin-embedder-policy-report-only": "require-corp",
+    "integrity-policy-report-only": "blocked-destinations=(script)",
+}
+
+
+def test_headers_analysed_but_never_demanded_are_inventoried():
+    inventory = headers.inventory(PRESENT_ONLY_RESPONSE)
+    assert inventory["security"] == {
+        "Clear-Site-Data": '"cookies"',
+        "Integrity-Policy": "blocked-destinations=(script)",
+        "Content-Security-Policy-Report-Only": "default-src 'none'",
+        "Cross-Origin-Embedder-Policy-Report-Only": "require-corp",
+        "Cross-Origin-Opener-Policy-Report-Only": "same-origin",
+        "Integrity-Policy-Report-Only": "blocked-destinations=(script)",
+    }
+
+
+def test_none_of_them_is_ever_reported_missing():
+    """The trap this arrangement exists to avoid.
+
+    SECURITY_HEADERS is read three times, and the third read is
+    _report_missing. Putting Integrity-Policy there to get it inventoried would
+    mint an `ip-missing` firing on very nearly every site on the web, which is
+    principle 4 -- so it is inventoried and not demanded.
+    """
+    missing = headers.inventory({})["missing"]
+    for name in ("Clear-Site-Data", "Integrity-Policy"):
+        assert name not in missing
+    assert not [name for name in missing if name.endswith("-Report-Only")]
+
+
+def test_a_response_omitting_them_raises_no_finding_about_them():
+    codes = {f.code for f in headers.analyze_all({})}
+    assert not [c for c in codes if c in ("csd-missing", "ip-missing")]
+    assert not [c for c in codes if c.endswith("-ro-unenforced")]
+
+
+def test_a_valid_integrity_policy_leaves_a_trace_in_the_report():
+    """It raised no finding and sat in no table, so the report said nothing.
+
+    A reader could not tell this response from one that never sent the header.
+    That is principle 2 -- inventories are facts -- failing by omission.
+    """
+    document = headers.report({"integrity-policy": "blocked-destinations=(script)"})
+    assert not [
+        f for f in document["response"]["findings"] if f["header"] == "Integrity-Policy"
+    ]
+    assert (
+        document["response"]["inventory"]["security"]["Integrity-Policy"]
+        == "blocked-destinations=(script)"
+    )
+
+
+def test_content_type_is_deliberately_in_no_inventory():
+    """The one header a finding can name that no table carries, on purpose.
+
+    It is analysed -- for the charset parameter alone -- so `information` and
+    `caching` cannot take it, both meaning "never analysed". And it is not a
+    security header: OWASP's 250 000-domain corpus tracks 17 names and
+    `content-type` is not among them. A sixth inventory key was designed and
+    deferred until a second such header exists; CLAUDE.md carries the trigger.
+    """
+    inventory = headers.inventory({"content-type": "text/html"})
+    assert not [table for table in inventory.values() if "Content-Type" in table]
 
 
 # ---------------------------------------------------------------------------

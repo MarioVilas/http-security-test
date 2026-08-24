@@ -35,6 +35,8 @@ sentence cannot be written that way have an entry in `_DISPLAY` instead, which
 is the only place a fragment of a sentence is assembled in code.
 """
 
+import collections
+
 MESSAGES = {
     # -- absence ------------------------------------------------------------
     # Every -missing code says the same thing, and the header it belongs to is
@@ -534,3 +536,79 @@ def describe(finding):
     data = finding.data or {}
     fields = display(data) if display else {k: _joined(v) for k, v in data.items()}
     return MESSAGES[finding.code].format(**fields)
+
+
+# What a misconfiguration could lead to. A hint about potential risk, never a
+# claim that the risk is reachable: whether an injected script exists, whether
+# the page is worth framing, whether anything sensitive is in the URL, are all
+# facts about an application that a response header cannot report. The wording
+# of every entry says so, because a consumer will paste it into a ticket.
+#
+# The slug is the contract and the taxonomy identifier is an attribute of it.
+# That is not a preference: CWE 4.20 has no weakness for MIME sniffing, for
+# XS-Leaks, or written for permission delegation, so a CWE-keyed vocabulary
+# would have had entries with no identifier or a forced one.
+Consequence = collections.namedtuple("Consequence", "name taxonomy text")
+
+CONSEQUENCES = {
+    "xss": Consequence(
+        "Cross-site scripting",
+        ("CWE-79", "CAPEC-63"),
+        "Script an attacker controls could run in this origin, with the same "
+        "access to cookies, storage and the DOM as the site's own code. "
+        "Whether an injection point exists is not determined here.",
+    ),
+    "clickjacking": Consequence(
+        "Clickjacking",
+        ("CWE-1021", "CAPEC-103"),
+        "The page could be framed by another site and overlaid, or redressed "
+        "in place by an attacker's injected styles, so a user clicking what "
+        "they see acts on what they do not. Whether the page has an action "
+        "worth stealing is not determined here.",
+    ),
+    "mitm": Consequence(
+        "Network interception",
+        ("CWE-319", "CAPEC-117"),
+        "A request could be carried in cleartext where someone on the path "
+        "can read or alter it, session cookies included. Whether an attacker "
+        "is on the path is not determined here.",
+    ),
+    "data-disclosure": Consequence(
+        "Sensitive data sent to third parties",
+        ("CWE-200",),
+        "The browser could hand data to a third party as part of ordinary "
+        "browsing -- a URL carrying a token, for instance -- or an "
+        "attacker's injected styles could read it through selector-driven "
+        "requests. Whether anything sensitive travels that way is not "
+        "determined here.",
+    ),
+    "cors-data-theft": Consequence(
+        "Cross-origin data theft",
+        ("CWE-942",),
+        "Another origin could read this response, including anything in it "
+        "specific to the logged-in user. Whether the response carries "
+        "user-specific content is not determined here.",
+    ),
+    "cache-exposure": Consequence(
+        "Sensitive data left in the browser",
+        ("CWE-525", "CAPEC-204"),
+        "Data could remain in the browser after it should have been cleared, "
+        "readable by the next person using the device. Whether anything "
+        "sensitive was stored is not determined here.",
+    ),
+    "cross-origin-leak": Consequence(
+        "Cross-origin state or resource leak",
+        ("CAPEC-663",),
+        "A page the user visits could measure something about this origin "
+        "that the same-origin policy is meant to hide, using the user's own "
+        "session. Whether anything measurable is worth learning is not "
+        "determined here.",
+    ),
+    "permission-abuse": Consequence(
+        "Powerful browser feature left available",
+        ("CWE-732",),
+        "A powerful capability such as the camera, microphone or location "
+        "could be reachable by the page or by a third party it embeds. "
+        "Whether anything embedded would use it is not determined here.",
+    ),
+}

@@ -88,9 +88,14 @@ def _finding_lines(report, color, codes, min_level):
         # Padded before it is painted: %-8s counts the escape bytes as content,
         # so colouring first collapses the column to nothing.
         level = _paint("%-8s" % finding["level"], finding["level"], color)
+        # Consequences ride on the message line rather than a line of their
+        # own: "what could this lead to" is what a reader runs a scan for, and
+        # the slugs are short enough not to crowd it.
+        slugs = finding.get("consequences") or []
+        suffix = "  [%s]" % ", ".join(slugs) if slugs else ""
         lines.append(
-            "  %s %-34s %s"
-            % (level, finding["header"], finding.get("message", finding["code"]))
+            "  %s %-34s %s%s"
+            % (level, finding["header"], finding.get("message", finding["code"]), suffix)
         )
         if codes:
             lines.append(

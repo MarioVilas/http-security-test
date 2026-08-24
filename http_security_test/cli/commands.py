@@ -20,23 +20,44 @@
 
 import sys
 
-from .. import FINDING_SEVERITY, MESSAGES, report
+from .. import (
+    CODE_HEADER,
+    CONSEQUENCES,
+    FINDING_SEVERITY,
+    MESSAGES,
+    consequences,
+    references,
+    report,
+    taxonomy,
+)
 from ..hsts import hstspreload
 from . import exchange, live, meta, run, scope, text, writers
 
 
 def do_explain(args):
-    """Print each named code's level and message template, or all of them.
-
-    Deliberately does not print which header a code belongs to: there is no
-    runtime code-to-header mapping, and inventing one here would duplicate
-    knowledge the analysers own. See the spec's "A code-to-header table".
-    """
+    """Print each named code's header, level, template, consequences and links."""
     wanted = list(args.code) if args.code else sorted(FINDING_SEVERITY)
     unknown = [code for code in wanted if code not in FINDING_SEVERITY]
     for code in wanted:
-        if code in FINDING_SEVERITY:
-            print("%-34s %-8s %s" % (code, FINDING_SEVERITY[code], MESSAGES[code]))
+        if code not in FINDING_SEVERITY:
+            continue
+        header = CODE_HEADER[code]
+        print("%-34s %-8s %s" % (code, FINDING_SEVERITY[code], header or "(response)"))
+        print(MESSAGES[code])
+        slugs = consequences(code)
+        if slugs:
+            print()
+            for slug in slugs:
+                entry = CONSEQUENCES[slug]
+                print("consequences: %s -- %s" % (slug, entry.name))
+                print("              %s" % entry.text)
+        links = []
+        if header:
+            links.append(references.header_url(header))
+        links.extend(references.taxonomy_url(i) for i in taxonomy(code))
+        for link in [link for link in links if link]:
+            print("  %s" % link)
+        print()
     for code in unknown:
         print("%s: no such code" % code, file=sys.stderr)
     return 2 if unknown else 0

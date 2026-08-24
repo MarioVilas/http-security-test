@@ -17,7 +17,14 @@
 - **No test may depend on `/home/crapula/ref` or `tmp/`.** Those are used by one-off generator steps whose *output* is committed; the suite must pass on a clean clone.
 - **GPL-3.0-or-later notice** at the top of every new source file, copied verbatim from `http_security_test/findings.py:1-18`.
 - **`ruff check` stays clean.** Do not run `ruff format`; the human owns formatting.
-- **Never run a state-changing or working-tree-discarding git command.** No `stash`, `checkout -- <path>`, `restore`, `reset`, `clean`. To restore a file broken on purpose, copy it back from a backup outside the repo. Committing is fine and expected — the human's rule is about *destroying* work, and each task below ends in a commit.
+- **Never run a git command that writes. Leave your work uncommitted.** A `PreToolUse` hook denies every git verb outside a read-only allowlist and it will stop you — that is the repository's rule, working as designed, not a misconfiguration to route around. `add`, `commit`, `push`, `stash`, `branch`, `merge`, `rebase`, `checkout -- <path>`, `restore`, `reset`, `clean`: all denied. Reading is always fine (`show`, `log`, `diff`, `status`, `rev-parse`). The controller snapshots your files for review after each task, and the human owns every commit in this repository.
+- **To restore a file you broke on purpose** — the mutation-test steps below require exactly this — copy it back from a backup made outside the repo. **Never reach for git to undo your own edit.** Other agents may be working in this tree; `git checkout -- <path>` over their never-staged changes is unrecoverable, because content that was never staged never entered the object database and no blob survives.
+- **The tree accumulates.** Nothing is committed between tasks, so by Task 6 the working tree carries every earlier task's changes. Never infer "what I changed" from `git status` or `git diff` — they show the whole run. Report the files *you* touched, from your own record.
+
+```bash
+SCRATCH=$(mktemp -d); cp module.py "$SCRATCH/"   # ...mutate, run the suite...
+cp "$SCRATCH/module.py" module.py
+```
 - **Tables are tuples, never sets.** A set literal reorders output per process and breaks determinism.
 - **Analysers must not import `catalog.py` or `references.py`.** A test walks the AST to enforce the `cli` direction; keep the same discipline here.
 - **Consequence slugs are the eight in the spec and no others:** `xss`, `clickjacking`, `mitm`, `data-disclosure`, `cors-data-theft`, `cache-exposure`, `cross-origin-leak`, `permission-abuse`.
@@ -181,17 +188,17 @@ cp "$SCRATCH/findings.py" http_security_test/findings.py
 python -m pytest tests/test_headers.py -k declared -q   # expect PASS
 ```
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: Report, do not commit**
 
-```bash
-git add http_security_test/findings.py http_security_test/__init__.py tests/test_headers.py
-git commit -m "feat: declare CODE_HEADER, the code-to-header table
+**Do not run any git command that writes.** A PreToolUse hook denies
+`add` and `commit` outright and will stop you; that is the repository's
+rule, not a misconfiguration, so do not work around it. Leave every change
+in the working tree. The controller snapshots your files for review and the
+human owns every commit.
 
-Parked since the CLI landed. explain needs it and cannot fake it, and a
-SARIF writer's rules[] will want it next. None for duplicate-headers,
-which is about the response rather than any one header, so the table
-stays total and both bijection tests bite."
-```
+Write your report to the report file named in your dispatch, listing the
+files you touched, the commands you ran and their output. Return the short
+status contract only.
 
 ---
 
@@ -427,17 +434,17 @@ cp "$SCRATCH/references.py" http_security_test/references.py
 python -m pytest tests/test_references.py -q   # expect PASS
 ```
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: Report, do not commit**
 
-```bash
-git add http_security_test/references.py http_security_test/__init__.py tests/test_references.py
-git commit -m "feat: add references.py, header and taxonomy URL derivation
+**Do not run any git command that writes.** A PreToolUse hook denies
+`add` and `commit` outright and will stop you; that is the repository's
+rule, not a misconfiguration, so do not work around it. Leave every change
+in the working tree. The controller snapshots your files for review and the
+human owns every commit.
 
-Identifiers in the report, URLs derived here, so nothing that rots is
-stored. Resolution is MDN, then a permanent spec, then http.dev --
-ordered by the publisher's permanence policy rather than by how official
-the source sounds. One positive table so an unknown name fails closed."
-```
+Write your report to the report file named in your dispatch, listing the
+files you touched, the commands you ran and their output. Return the short
+status contract only.
 
 ---
 
@@ -618,20 +625,17 @@ Expected: `test_every_emittable_code_declares_consequences` FAILS (the table is 
 
 In `__init__.py`, add `CONSEQUENCES` and `Consequence` to the `from .catalog import` line, `CODE_CONSEQUENCES` and `consequences` to the `from .findings import` block, and all four to `__all__` in alphabetical position.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Report, do not commit**
 
-```bash
-git add http_security_test/catalog.py http_security_test/findings.py \
-        http_security_test/__init__.py tests/test_headers.py
-git commit -m "feat: add the consequence vocabulary, mappings still empty
+**Do not run any git command that writes.** A PreToolUse hook denies
+`add` and `commit` outright and will stop you; that is the repository's
+rule, not a misconfiguration, so do not work around it. Leave every change
+in the working tree. The controller snapshots your files for review and the
+human owns every commit.
 
-Eight slugs, coarse on purpose: this names a class of harm, never a
-detected vulnerability, and every rendered sentence says so. The slug is
-the contract and the CWE/CAPEC id an attribute, because CWE 4.20 has no
-weakness for MIME sniffing, XS-Leaks, or permission delegation.
-
-Two bijection tests fail until the mappings land."
-```
+Write your report to the report file named in your dispatch, listing the
+files you touched, the commands you ran and their output. Return the short
+status contract only.
 
 ---
 
@@ -706,12 +710,17 @@ python -m pytest tests/test_headers.py -k "consequence or slug" -v
 
 Expected: `test_every_emittable_code_declares_consequences` still FAILS (67 codes unmapped), `test_every_slug_a_code_names_is_defined` PASSES, `test_every_defined_slug_is_named_by_some_code` still FAILS (four slugs unnamed).
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Report, do not commit**
 
-```bash
-git add http_security_test/findings.py
-git commit -m "feat: map consequences for CSP, HSTS, XFO, XCTO, Referrer-Policy"
-```
+**Do not run any git command that writes.** A PreToolUse hook denies
+`add` and `commit` outright and will stop you; that is the repository's
+rule, not a misconfiguration, so do not work around it. Leave every change
+in the working tree. The controller snapshots your files for review and the
+human owns every commit.
+
+Write your report to the report file named in your dispatch, listing the
+files you touched, the commands you ran and their output. Return the short
+status contract only.
 
 ---
 
@@ -785,19 +794,17 @@ python -m pytest tests/test_headers.py -k "consequence or slug" -v
 
 Expected: the two bijection tests still FAIL (31 codes unmapped, `permission-abuse` still unnamed).
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Report, do not commit**
 
-```bash
-git add http_security_test/findings.py
-git commit -m "feat: map consequences for CORS, isolation, Clear-Site-Data, XPCDP, XXP
+**Do not run any git command that writes.** A PreToolUse hook denies
+`add` and `commit` outright and will stop you; that is the repository's
+rule, not a misconfiguration, so do not work around it. Leave every change
+in the working tree. The controller snapshots your files for review and the
+human owns every commit.
 
-Seven of nine CORS codes carry nothing. Their messages describe a
-response that fails closed -- the preflight fails, no cross-origin read
-succeeds -- so they are interop defects, not exposure. Only acao-null
-and acao-wildcard widen access, and acao-wildcard is a note while
-acao-credentials-wildcard is an error, which is the clearest evidence
-the rating and the consequence are independent axes."
-```
+Write your report to the report file named in your dispatch, listing the
+files you touched, the commands you ran and their output. Return the short
+status contract only.
 
 ---
 
@@ -874,7 +881,12 @@ print('%d codes with a consequence, %d with none, %d total' % (n, len(C)-n, len(
 "
 ```
 
-Expected: `60 codes with a consequence, 42 with none, 102 total`.
+Expected: `61 codes with a consequence, 41 with none, 102 total`.
+
+(An earlier draft of this line said 60/42. That was an arithmetic slip in
+the plan's own hand-count -- Cross-Origin-Embedder-Policy contributes three
+non-empty codes, not two. The mappings above are correct; the summary was
+not. Verified against the built table on 2026-08-23.)
 
 - [ ] **Step 3: Mutation-test the bijections**
 
@@ -886,23 +898,24 @@ python -m pytest tests/test_headers.py -k consequence -q   # expect FAIL
 cp "$SCRATCH/findings.py" http_security_test/findings.py
 sed -i 's/"cache-exposure": Consequence(/"unused-slug": Consequence(/' http_security_test/catalog.py
 python -m pytest tests/test_headers.py -k slug -q          # expect FAIL both directions
-git diff --stat   # confirm only catalog.py is dirty, then restore it
+# The tree carries every prior task's uncommitted work, so a dirty-file
+# check proves nothing here. Restore with the inverse sed below.
 cp "$SCRATCH/findings.py" http_security_test/findings.py
 ```
 
 Restore `catalog.py` by reverting the `sed` with the inverse substitution, not with git.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Report, do not commit**
 
-```bash
-git add http_security_test/findings.py
-git commit -m "feat: map the remaining consequences; both bijections now hold
+**Do not run any git command that writes.** A PreToolUse hook denies
+`add` and `commit` outright and will stop you; that is the repository's
+rule, not a misconfiguration, so do not work around it. Leave every change
+in the working tree. The controller snapshots your files for review and the
+human owns every commit.
 
-60 codes carry a consequence and 42 carry none. Empty is a result: the
-reporting family withholds no protection, the deprecated headers bind
-nothing, and duplicate-headers names an ambiguity whose cost depends on
-which header repeated."
-```
+Write your report to the report file named in your dispatch, listing the
+files you touched, the commands you ran and their output. Return the short
+status contract only.
 
 ---
 
@@ -1014,19 +1027,19 @@ python -m pytest tests/test_headers.py -k "overlay or taxonomy or inherits" -v &
 
 Expected: 5 passing, ruff clean.
 
-- [ ] **Step 5: Export and commit**
+- [ ] **Step 5: Export, then report**
 
 Add `CODE_TAXONOMY` and `taxonomy` to `__init__.py` imports and `__all__`.
 
-```bash
-git add http_security_test/findings.py http_security_test/__init__.py tests/test_headers.py
-git commit -m "feat: add the sparse CODE_TAXONOMY overlay
+**Do not run any git command that writes.** A PreToolUse hook denies
+`add` and `commit` outright and will stop you; that is the repository's
+rule, not a misconfiguration, so do not work around it. Leave every change
+in the working tree. The controller snapshots your files for review and the
+human owns every commit.
 
-Union with the slug's identifiers, never a replacement: adding precision
-must not delete the general classification. Deliberately partial, and
-tested one direction only -- an absent entry means no better id was
-found, not that none exists."
-```
+Write your report to the report file named in your dispatch, listing the
+files you touched, the commands you ran and their output. Return the short
+status contract only.
 
 ---
 
@@ -1178,16 +1191,17 @@ URL by pattern, and a name does not rot. `references.header_url()` and
 nothing wrong carries two empty lists.
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Report, do not commit**
 
-```bash
-git add http_security_test/reporting.py tests/test_headers.py
-git commit -m "feat: carry consequences per finding and a references block per response
+**Do not run any git command that writes.** A PreToolUse hook denies
+`add` and `commit` outright and will stop you; that is the repository's
+rule, not a misconfiguration, so do not work around it. Leave every change
+in the working tree. The controller snapshots your files for review and the
+human owns every commit.
 
-Identifiers rather than URLs, so nothing that rots is stored. Header
-names come from CODE_HEADER rather than the finding, which is what stops
-duplicate-headers' lowercase resolving to nothing."
-```
+Write your report to the report file named in your dispatch, listing the
+files you touched, the commands you ran and their output. Return the short
+status contract only.
 
 ---
 
@@ -1371,16 +1385,17 @@ The variable is `UPDATE_CLI_SNAPSHOT` and the selector is `-k cli_snapshot` — 
 python -m pytest tests/ -q && ruff check
 ```
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Report, do not commit**
 
-```bash
-git add http_security_test/cli/text.py http_security_test/cli/commands.py \
-        tests/test_cli_text.py tests/test_cli_explain.py tests/cli_terminal_snapshot.txt
-git commit -m "feat: show consequences on the terminal and in explain
+**Do not run any git command that writes.** A PreToolUse hook denies
+`add` and `commit` outright and will stop you; that is the repository's
+rule, not a misconfiguration, so do not work around it. Leave every change
+in the working tree. The controller snapshots your files for review and the
+human owns every commit.
 
-explain finally earns its keep: it can name the owning header now that
-CODE_HEADER is declared, which is the reason that table was in scope."
-```
+Write your report to the report file named in your dispatch, listing the
+files you touched, the commands you ran and their output. Return the short
+status contract only.
 
 ---
 
@@ -1428,12 +1443,17 @@ python -m pytest tests/ -q 2>&1 | tail -2
 
 Update the test count and add: 102 codes each with a rating, a message template, a declared header and a consequence tuple; 8 consequence slugs; `references.py` resolving 40 headers.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Report, do not commit**
 
-```bash
-git add CLAUDE.md
-git commit -m "docs: record consequences, references and CODE_HEADER in CLAUDE.md"
-```
+**Do not run any git command that writes.** A PreToolUse hook denies
+`add` and `commit` outright and will stop you; that is the repository's
+rule, not a misconfiguration, so do not work around it. Leave every change
+in the working tree. The controller snapshots your files for review and the
+human owns every commit.
+
+Write your report to the report file named in your dispatch, listing the
+files you touched, the commands you ran and their output. Return the short
+status contract only.
 
 ---
 

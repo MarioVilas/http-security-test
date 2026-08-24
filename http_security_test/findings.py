@@ -172,6 +172,351 @@ FINDING_SEVERITY = {
 }
 
 
+# Which header a code belongs to, declared rather than inferred. The prefix of a
+# code is a mnemonic and not a lookup -- `re-` is Reporting-Endpoints and `rp-`
+# is Referrer-Policy -- so a consumer that wants the owning header has no way to
+# ask without this. `explain` is the first caller and a SARIF writer's rules[]
+# will be the second. None means the response rather than any one header.
+CODE_HEADER = {
+    # duplicate-headers is about the response, not any one header: any
+    # header may be repeated, so a code-keyed view cannot name an owner.
+    "duplicate-headers": None,
+    # -- Access-Control-Allow-Credentials
+    "acac-ineffective": "Access-Control-Allow-Credentials",
+    # -- Access-Control-Allow-Headers
+    "acah-credentials-wildcard": "Access-Control-Allow-Headers",
+    # -- Access-Control-Allow-Methods
+    "acam-credentials-wildcard": "Access-Control-Allow-Methods",
+    "acam-forbidden-method": "Access-Control-Allow-Methods",
+    # -- Access-Control-Allow-Origin
+    "acao-credentials-wildcard": "Access-Control-Allow-Origin",
+    "acao-invalid-origin": "Access-Control-Allow-Origin",
+    "acao-multiple-origins": "Access-Control-Allow-Origin",
+    "acao-null": "Access-Control-Allow-Origin",
+    "acao-wildcard": "Access-Control-Allow-Origin",
+    # -- Access-Control-Expose-Headers
+    "aceh-credentials-wildcard": "Access-Control-Expose-Headers",
+    # -- Access-Control-Max-Age
+    "acma-invalid": "Access-Control-Max-Age",
+    # -- Clear-Site-Data
+    "csd-empty": "Clear-Site-Data",
+    "csd-unknown-type": "Clear-Site-Data",
+    "csd-unquoted": "Clear-Site-Data",
+    # -- Content-Security-Policy
+    "csp-deprecated-directive": "Content-Security-Policy",
+    "csp-frame-ancestors-wildcard": "Content-Security-Policy",
+    "csp-http-source": "Content-Security-Policy",
+    "csp-invalid-keyword": "Content-Security-Policy",
+    "csp-ip-source": "Content-Security-Policy",
+    "csp-missing": "Content-Security-Policy",
+    "csp-missing-semicolon": "Content-Security-Policy",
+    "csp-no-base-uri": "Content-Security-Policy",
+    "csp-no-default-src": "Content-Security-Policy",
+    "csp-no-frame-ancestors": "Content-Security-Policy",
+    "csp-no-object-src": "Content-Security-Policy",
+    "csp-nonce-weak": "Content-Security-Policy",
+    "csp-plain-scheme": "Content-Security-Policy",
+    "csp-report-to-undefined": "Content-Security-Policy",
+    "csp-unknown-directive": "Content-Security-Policy",
+    "csp-unsafe-eval": "Content-Security-Policy",
+    "csp-unsafe-inline": "Content-Security-Policy",
+    "csp-unsafe-inline-style": "Content-Security-Policy",
+    "csp-wildcard": "Content-Security-Policy",
+    # -- Content-Security-Policy-Report-Only
+    "csp-ro-unenforced": "Content-Security-Policy-Report-Only",
+    # -- Content-Type
+    "ct-no-charset": "Content-Type",
+    # -- Cross-Origin-Embedder-Policy
+    "coep-invalid": "Cross-Origin-Embedder-Policy",
+    "coep-missing": "Cross-Origin-Embedder-Policy",
+    "coep-no-isolation": "Cross-Origin-Embedder-Policy",
+    "coep-report-to-undefined": "Cross-Origin-Embedder-Policy",
+    "coep-unsafe-none": "Cross-Origin-Embedder-Policy",
+    # -- Cross-Origin-Embedder-Policy-Report-Only
+    "coep-ro-unenforced": "Cross-Origin-Embedder-Policy-Report-Only",
+    # -- Cross-Origin-Opener-Policy
+    "coop-missing": "Cross-Origin-Opener-Policy",
+    "coop-report-to-undefined": "Cross-Origin-Opener-Policy",
+    "coop-unsafe-none": "Cross-Origin-Opener-Policy",
+    # -- Cross-Origin-Opener-Policy-Report-Only
+    "coop-ro-unenforced": "Cross-Origin-Opener-Policy-Report-Only",
+    # -- Cross-Origin-Resource-Policy
+    "corp-cross-origin": "Cross-Origin-Resource-Policy",
+    "corp-invalid": "Cross-Origin-Resource-Policy",
+    "corp-missing": "Cross-Origin-Resource-Policy",
+    # -- Expect-CT
+    "ect-deprecated": "Expect-CT",
+    # -- Feature-Policy
+    "fp-conflicts": "Feature-Policy",
+    "fp-deprecated": "Feature-Policy",
+    "fp-empty": "Feature-Policy",
+    "fp-wildcard": "Feature-Policy",
+    # -- Integrity-Policy
+    "ip-endpoints-undefined": "Integrity-Policy",
+    "ip-invalid": "Integrity-Policy",
+    "ip-no-blocked-destinations": "Integrity-Policy",
+    "ip-sources-without-inline": "Integrity-Policy",
+    "ip-style-unsupported": "Integrity-Policy",
+    "ip-unknown-destination": "Integrity-Policy",
+    # -- Integrity-Policy-Report-Only
+    "ip-ro-unenforced": "Integrity-Policy-Report-Only",
+    # -- P3P
+    "p3p-deprecated": "P3P",
+    # -- Permissions-Policy
+    "pp-empty": "Permissions-Policy",
+    "pp-invalid": "Permissions-Policy",
+    "pp-legacy-syntax": "Permissions-Policy",
+    "pp-missing": "Permissions-Policy",
+    "pp-wildcard": "Permissions-Policy",
+    # -- Public-Key-Pins
+    "hpkp-deprecated": "Public-Key-Pins",
+    # -- Public-Key-Pins-Report-Only
+    "hpkp-ro-deprecated": "Public-Key-Pins-Report-Only",
+    # -- Referrer-Policy
+    "rp-invalid": "Referrer-Policy",
+    "rp-missing": "Referrer-Policy",
+    "rp-unsafe-url": "Referrer-Policy",
+    # -- Report-To
+    "rt-endpoint-undeliverable": "Report-To",
+    "rt-ineffective": "Report-To",
+    "rt-invalid": "Report-To",
+    # -- Reporting-Endpoints
+    "re-endpoint-undeliverable": "Reporting-Endpoints",
+    "re-ineffective": "Reporting-Endpoints",
+    "re-invalid": "Reporting-Endpoints",
+    # -- Strict-Transport-Security
+    "hsts-malformed": "Strict-Transport-Security",
+    "hsts-max-age-short": "Strict-Transport-Security",
+    "hsts-max-age-zero": "Strict-Transport-Security",
+    "hsts-missing": "Strict-Transport-Security",
+    "hsts-no-include-subdomains": "Strict-Transport-Security",
+    "hsts-not-preloaded": "Strict-Transport-Security",
+    "hsts-preload-ineffective": "Strict-Transport-Security",
+    # -- X-Content-Security-Policy
+    "xcsp-deprecated": "X-Content-Security-Policy",
+    # -- X-Content-Type-Options
+    "xcto-invalid": "X-Content-Type-Options",
+    "xcto-missing": "X-Content-Type-Options",
+    # -- X-DNS-Prefetch-Control
+    "xdpc-nonstandard": "X-DNS-Prefetch-Control",
+    # -- X-Download-Options
+    "xdo-deprecated": "X-Download-Options",
+    # -- X-Frame-Options
+    "xfo-allow-from": "X-Frame-Options",
+    "xfo-invalid": "X-Frame-Options",
+    "xfo-missing": "X-Frame-Options",
+    # -- X-Permitted-Cross-Domain-Policies
+    "xpcdp-all": "X-Permitted-Cross-Domain-Policies",
+    "xpcdp-deprecated": "X-Permitted-Cross-Domain-Policies",
+    "xpcdp-invalid": "X-Permitted-Cross-Domain-Policies",
+    "xpcdp-policy-file": "X-Permitted-Cross-Domain-Policies",
+    # -- X-WebKit-CSP
+    "xwkcsp-deprecated": "X-WebKit-CSP",
+    # -- X-XSS-Protection
+    "xxp-blocked": "X-XSS-Protection",
+    "xxp-deprecated": "X-XSS-Protection",
+    "xxp-enabled": "X-XSS-Protection",
+    "xxp-invalid": "X-XSS-Protection",
+}
+
+
+# What each code's misconfiguration could lead to. Empty is a result and not an
+# omission: a reporting failure costs the operator information and withholds no
+# protection, and most CORS defects fail closed -- the preflight fails, nothing
+# is over-shared -- so those carry nothing. The ratings and this table are
+# independent axes on purpose: acao-credentials-wildcard is an error with no
+# consequence, and acao-wildcard is a note with a real one.
+CODE_CONSEQUENCES = {
+    # -- Content-Security-Policy
+    "csp-deprecated-directive": (),      # parsed and ignored; nothing was lost
+    "csp-frame-ancestors-wildcard": ("clickjacking",),
+    "csp-http-source": ("mitm", "xss"),  # a plaintext script source is swappable
+    "csp-invalid-keyword": ("xss",),
+    "csp-ip-source": (),                 # browsers do not match it; a dev leftover
+    "csp-missing": ("xss",),
+    "csp-missing-semicolon": ("xss",),
+    "csp-no-base-uri": ("xss",),
+    "csp-no-default-src": ("xss",),
+    "csp-no-frame-ancestors": ("clickjacking",),
+    "csp-no-object-src": ("xss",),
+    "csp-nonce-weak": ("xss",),
+    "csp-plain-scheme": ("xss",),
+    "csp-report-to-undefined": (),       # reporting: the operator loses a report
+    "csp-ro-unenforced": (),             # report-only content decides nothing
+    "csp-unknown-directive": (),         # what it meant to do is unknowable
+    "csp-unsafe-eval": ("xss",),
+    "csp-unsafe-inline": ("xss",),
+    # Not xss: the message is explicit that injected CSS cannot run script. It
+    # can redress the interface and read page data through selector-driven
+    # requests, which is those two slugs exactly.
+    "csp-unsafe-inline-style": ("clickjacking", "data-disclosure"),
+    "csp-wildcard": ("xss",),
+    # -- Strict-Transport-Security
+    "hsts-malformed": ("mitm",),
+    "hsts-max-age-short": ("mitm",),
+    "hsts-max-age-zero": ("mitm",),
+    "hsts-missing": ("mitm",),
+    "hsts-no-include-subdomains": ("mitm",),
+    "hsts-not-preloaded": ("mitm",),
+    "hsts-preload-ineffective": ("mitm",),
+    # -- X-Frame-Options
+    "xfo-allow-from": ("clickjacking",),
+    "xfo-invalid": ("clickjacking",),
+    "xfo-missing": ("clickjacking",),
+    # -- X-Content-Type-Options
+    # CAPEC names this exactly -- CAPEC-209 "XSS Using MIME Type Mismatch" --
+    # which is why there is no separate mime-confusion slug. The overlay in
+    # Task 7 attaches that id to the code.
+    "xcto-invalid": ("xss",),
+    "xcto-missing": ("xss",),
+    # -- Referrer-Policy
+    "rp-invalid": ("data-disclosure",),
+    "rp-missing": ("data-disclosure",),
+    "rp-unsafe-url": ("data-disclosure",),
+    # -- Access-Control-* : nine of eleven carry nothing, and that is the result.
+    # Read the messages: these describe a response that FAILS CLOSED. "the
+    # preflight fails", "no cross-origin read succeeds", "browsers refuse
+    # outright". They are availability and interop defects, not exposure -- the
+    # same reading CLAUDE.md already applies to ACAH: *. Only the two below
+    # widen access to anybody.
+    "acac-ineffective": (),
+    "acah-credentials-wildcard": (),
+    "acam-credentials-wildcard": (),
+    "acam-forbidden-method": (),
+    "aceh-credentials-wildcard": (),
+    "acma-invalid": (),
+    "acao-credentials-wildcard": (),
+    "acao-invalid-origin": (),
+    "acao-multiple-origins": (),
+    "acao-null": ("cors-data-theft",),   # any sandboxed frame can send Origin: null
+    "acao-wildcard": ("cors-data-theft",),
+    # -- Cross-Origin-Embedder-Policy
+    "coep-invalid": ("cross-origin-leak",),
+    "coep-missing": ("cross-origin-leak",),
+    # Loss of function, not of protection: the message is about
+    # crossOriginIsolated staying false and SharedArrayBuffer being unavailable.
+    "coep-no-isolation": (),
+    "coep-report-to-undefined": (),
+    "coep-ro-unenforced": (),
+    "coep-unsafe-none": ("cross-origin-leak",),
+    # -- Cross-Origin-Opener-Policy
+    "coop-missing": ("cross-origin-leak",),
+    "coop-report-to-undefined": (),
+    "coop-ro-unenforced": (),
+    "coop-unsafe-none": ("cross-origin-leak",),
+    # -- Cross-Origin-Resource-Policy
+    "corp-cross-origin": ("cross-origin-leak",),
+    "corp-invalid": ("cross-origin-leak",),
+    "corp-missing": ("cross-origin-leak",),
+    # -- Clear-Site-Data: every one of these is a logout that does not clear.
+    "csd-empty": ("cache-exposure",),
+    "csd-unknown-type": ("cache-exposure",),
+    "csd-unquoted": ("cache-exposure",),
+    # -- X-Permitted-Cross-Domain-Policies. CWE-942 is literally "Permissive
+    # Cross-domain Security Policy with Untrusted Domains", written for this.
+    "xpcdp-all": ("cors-data-theft",),
+    "xpcdp-deprecated": (),              # the restrictive setting; no defect
+    "xpcdp-invalid": ("cors-data-theft",),
+    "xpcdp-policy-file": ("cors-data-theft",),
+    # -- X-XSS-Protection
+    "xxp-blocked": ("cross-origin-leak",),  # the message names a side channel
+    "xxp-deprecated": (),                   # "present but disabled" is correct
+    "xxp-enabled": ("xss",),                # the auditor introduced XSS
+    "xxp-invalid": (),                      # falls back to a default that is inert
+    # -- Permissions-Policy / Feature-Policy
+    "pp-empty": ("permission-abuse",),
+    "pp-invalid": ("permission-abuse",),        # whole header ignored
+    "pp-legacy-syntax": ("permission-abuse",),  # whole header ignored
+    "pp-missing": ("permission-abuse",),
+    "pp-wildcard": ("permission-abuse",),
+    "fp-conflicts": (),                         # says which header wins, not a risk
+    "fp-deprecated": (),
+    "fp-empty": ("permission-abuse",),
+    "fp-wildcard": ("permission-abuse",),
+    # -- Integrity-Policy. Its job is to refuse subresources with no integrity
+    # metadata, so a policy that enforces nothing leaves a compromised CDN
+    # script running in the page.
+    "ip-endpoints-undefined": (),               # reporting only
+    "ip-invalid": ("xss",),
+    "ip-no-blocked-destinations": ("xss",),
+    "ip-ro-unenforced": (),
+    "ip-sources-without-inline": ("xss",),
+    "ip-style-unsupported": (),                 # no engine implements it either way
+    "ip-unknown-destination": ("xss",),
+    # -- Reporting. The whole family carries nothing, which is the same
+    # reasoning that rates it all `note`: a reporting failure costs the
+    # operator information and withholds no browser protection.
+    "re-endpoint-undeliverable": (),
+    "re-ineffective": (),
+    "re-invalid": (),
+    "rt-endpoint-undeliverable": (),
+    "rt-ineffective": (),
+    "rt-invalid": (),
+    # -- Legacy CSP aliases: if one of these is the only policy sent, the page
+    # has no policy at all.
+    "xcsp-deprecated": ("xss",),
+    "xwkcsp-deprecated": ("xss",),
+    # -- Everything else that withholds no protection.
+    "ct-no-charset": (),        # the message says outright: not a defect
+    "ect-deprecated": (),
+    "hpkp-deprecated": (),      # browsers removed pinning; the pins bind nothing
+    "hpkp-ro-deprecated": (),
+    "p3p-deprecated": (),
+    "xdo-deprecated": (),
+    "xdpc-nonstandard": (),     # `on` is the default everywhere it works
+    # Ambiguity rather than a named risk: which value wins is client-specific,
+    # so what it costs depends on which header repeated and cannot be said here.
+    "duplicate-headers": (),
+}
+
+
+def consequences(code):
+    """The consequence slugs for a code, worst-case first in table order."""
+    return CODE_CONSEQUENCES.get(code, ())
+
+
+# A sparse overlay: a specific published entry, where one describes a code
+# better than its slug's general classification does. Most codes have no entry
+# and simply inherit. This is the one table in the package that is NOT a
+# bijection with the emittable codes, and that is deliberate -- an absent entry
+# means "no better id was found", never "none exists".
+CODE_TAXONOMY = {
+    # CAPEC-209 "XSS Using MIME Type Mismatch" is the exact mechanism.
+    "xcto-invalid": ("CAPEC-209",),
+    "xcto-missing": ("CAPEC-209",),
+    # CAPEC-102 "Session Sidejacking" is the specific loss, where the slug's
+    # CAPEC-117 "Interception" is the Meta-level parent.
+    "hsts-malformed": ("CAPEC-102",),
+    "hsts-max-age-zero": ("CAPEC-102",),
+    "hsts-missing": ("CAPEC-102",),
+    # CAPEC-222 "iFrame Overlay" joins CWE-1021 and names the delivery.
+    "xfo-allow-from": ("CAPEC-222",),
+    "xfo-invalid": ("CAPEC-222",),
+    "xfo-missing": ("CAPEC-222",),
+    "csp-frame-ancestors-wildcard": ("CAPEC-222",),
+    "csp-no-frame-ancestors": ("CAPEC-222",),
+}
+
+
+def _identifier_sort_key(identifier):
+    # By scheme then NUMERIC id. Lexically, CWE-1021 sorts before CWE-79.
+    scheme, _, number = identifier.partition("-")
+    return (scheme, int(number))
+
+
+def taxonomy(code):
+    """Every taxonomy identifier for a code: its slugs' union the overlay's."""
+    # Function-local, not module-level. catalog.py imports nothing from this
+    # package today, so a module-scope import here would not actually be a
+    # cycle -- but deferring it keeps catalog.py free to import findings.py
+    # later without one opening up, which a module-scope import would foreclose.
+    from .catalog import CONSEQUENCES
+
+    ids = {i for s in consequences(code) for i in CONSEQUENCES[s].taxonomy}
+    ids.update(CODE_TAXONOMY.get(code, ()))
+    return tuple(sorted(ids, key=_identifier_sort_key))
+
+
 # Worst first; also the order findings are printed in.
 SEVERITIES = ("error", "warning", "note")
 

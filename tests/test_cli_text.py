@@ -30,6 +30,7 @@ FINDINGS = [
         "level": "warning",
         "data": {},
         "message": "missing",
+        "consequences": ["xss"],
     },
     {
         "header": "Access-Control-Allow-Origin",
@@ -37,13 +38,17 @@ FINDINGS = [
         "level": "error",
         "data": {"origin": "null"},
         "message": "permits the null origin",
+        "consequences": ["cors-data-theft"],
     },
     {
+        # Deliberately keeps no consequences: xdpc-nonstandard really maps to
+        # (), so this is the negative case rather than an oversight.
         "header": "X-DNS-Prefetch-Control",
         "code": "xdpc-nonstandard",
         "level": "note",
         "data": {},
         "message": "never standardised",
+        "consequences": [],
     },
 ]
 
@@ -137,6 +142,27 @@ def test_codes_annotates_each_finding_with_its_code_and_data():
     out = text.render(DOCUMENT, codes=True)
     assert "acao-null" in out
     assert '{"origin": "null"}' in out
+
+
+def test_a_finding_line_names_its_consequences():
+    out = text.render(DOCUMENT)
+    assert "[xss]" in out
+    assert "[cors-data-theft]" in out
+
+
+def test_a_finding_with_no_consequence_gets_no_brackets():
+    line = next(
+        l for l in text.render(DOCUMENT).splitlines() if "X-DNS-Prefetch-Control" in l
+    )
+    assert "[" not in line
+
+
+def test_a_finding_missing_the_key_entirely_still_renders():
+    # A caller on the old schema, or a hand-built document. .get() not [].
+    stale = {"header": "X-Frame-Options", "code": "xfo-missing",
+             "level": "warning", "data": {}, "message": "missing"}
+    assert "X-Frame-Options" in "\n".join(text._finding_lines(
+        {"response": {"findings": [stale]}}, False, False, "note"))
 
 
 def test_min_level_filters_the_terminal():
