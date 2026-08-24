@@ -23,6 +23,7 @@ share/python-wheels/
 *.egg
 .pytest_cache/
 .ruff_cache/
+venv/
 
 # Claude
 .remember/
