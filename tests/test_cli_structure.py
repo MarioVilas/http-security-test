@@ -27,36 +27,128 @@ from http_security_test.cli import meta, options
 
 PACKAGE = pathlib.Path(http_security_test.__file__).parent
 
+# Lowest first. A module may import its own layer and anything below it.
+LAYERS = ("core", "adaptors", "formats", "cli")
 
-def _imports_cli(path):
-    """True if this module imports the cli subpackage, however spelled."""
+CORE = (
+    "findings", "catalog", "message", "references", "csp", "hsts",
+    "isolation", "policies", "legacy", "response", "reporting", "exchange",
+)
+
+
+def _layer_of(name):
+    if name in CORE:
+        return "core"
+    return name if name in LAYERS else "core"
+
+
+def _self_head(dotted):
+    """The first path component after this package's own name.
+
+    `import http_security_test.cli` and `from http_security_test.cli import
+    x` both carry `http_security_test.cli` as the dotted name being
+    resolved; this pulls out `cli`, the part _layer_of() knows how to
+    classify. None for a dotted name that does not name this package at all
+    (any stdlib or third-party import) -- that is not this package's own
+    layering to police, and _layer_of()'s own fallback treats it as "core"
+    wherever it is asked about, which can never trigger a violation since
+    core is the lowest layer.
+    """
+    parts = dotted.split(".")
+    if len(parts) > 1 and parts[0] == http_security_test.__name__:
+        return parts[1]
+    return None
+
+
+def _imported_layers(path):
+    """The layers this module imports from, by first path component.
+
+    Catches both relative imports (`from .cli import x`, `from . import
+    cli`) and absolute ones that spell the package name out
+    (`import http_security_test.cli`, `from http_security_test.cli import
+    x`, `from http_security_test import cli`). A test that only inspected
+    `node.level` would miss every absolute form -- exactly the gap that let
+    a single-name grep stand in for this rule before "adaptors" existed as a
+    second layer worth naming.
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"))
+    found = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            if (node.module or "").split(".")[0] == "cli":
-                return True
-            if node.module is None and any(a.name == "cli" for a in node.names):
-                return True
+            if node.level:
+                # from .foo import bar / from . import foo
+                head = (node.module or "").split(".")[0]
+                if head:
+                    found.add(_layer_of(head))
+                else:
+                    found.update(_layer_of(a.name) for a in node.names)
+            elif node.module:
+                # from http_security_test.foo import bar
+                head = _self_head(node.module)
+                if head:
+                    found.add(_layer_of(head))
+                elif node.module == http_security_test.__name__:
+                    # from http_security_test import foo
+                    found.update(_layer_of(a.name) for a in node.names)
         elif isinstance(node, ast.Import):
-            if any(a.name.split(".")[0] == "cli" for a in node.names):
-                return True
-    return False
+            for alias in node.names:
+                # import http_security_test.foo
+                head = _self_head(alias.name)
+                if head:
+                    found.add(_layer_of(head))
+    return found
+
+
+def _imports_cli(path):
+    """True if this module imports the cli subpackage, however spelled.
+
+    A narrow wrapper around _imported_layers() rather than its own AST walk,
+    so there is exactly one place that decides what an import "means" for
+    layering purposes -- a second, independently-written detector is how the
+    absolute-import gap this module's history records got missed the first
+    time.
+    """
+    return "cli" in _imported_layers(path)
 
 
 def test_no_analyser_module_imports_the_cli():
-    # The library's identity is that it never fetches. That survives only while
-    # the dependency runs one way, so it is pinned rather than trusted.
+    # A narrower echo of test_imports_only_ever_run_downhill, kept because it
+    # names the exact invariant CLAUDE.md's opening paragraph states in
+    # isolation: nothing outside cli/ may import cli, whether the importer
+    # lives in core or in adaptors, and however the import is spelled.
     offenders = [p.name for p in sorted(PACKAGE.glob("*.py")) if _imports_cli(p)]
     assert offenders == []
 
 
-def test_importing_the_library_does_not_import_the_cli():
-    # A subprocess, because this session has already imported everything.
-    probe = "import http_security_test, sys; print('http_security_test.cli' in sys.modules)"
+def test_imports_only_ever_run_downhill():
+    # Replaces the single-name check above with the rule it was an instance
+    # of. It now also catches a format parser reaching into adaptors, or an
+    # adaptor reaching into cli, which the single-name check could not see
+    # because neither existed as a layer when it was written.
+    offenders = []
+    for path in sorted(PACKAGE.glob("*.py")):
+        if path.stem == "__init__":
+            continue
+        mine = LAYERS.index(_layer_of(path.stem))
+        for other in _imported_layers(path):
+            if LAYERS.index(other) > mine:
+                offenders.append("%s -> %s" % (path.name, other))
+    assert offenders == []
+
+
+def test_importing_the_library_does_not_import_the_adaptors_or_the_cli():
+    # __init__ exports the core only, which is what keeps the base import
+    # cheap and dependency-free. A subprocess, because this session has
+    # already imported everything.
+    probe = (
+        "import http_security_test, sys; "
+        "print(sorted(m for m in ('http_security_test.cli', "
+        "'http_security_test.adaptors') if m in sys.modules))"
+    )
     done = subprocess.run(
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True
     )
-    assert done.stdout.strip() == "False"
+    assert done.stdout.strip() == "[]"
 
 
 def test_the_console_entry_point_resolves():

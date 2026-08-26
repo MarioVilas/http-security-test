@@ -29,7 +29,7 @@ property and never reaches a file.
 import collections
 import json
 
-from . import exchange, meta
+from . import meta, outcome
 
 # The library's SEVERITIES, reversed, so a floor is an index comparison.
 # Lives in meta.py so options.py and commands.py can reach it without
@@ -141,7 +141,7 @@ def _summary_lines(document):
     if counts:
         lines.append("    findings: %s" % _counted(counts))
     if failures:
-        # By exchange.FAILURE_KINDS, matching the counts above ordered by
+        # By outcome.FAILURE_KINDS, matching the counts above ordered by
         # severity -- not sorted(), which does not agree with that table
         # (e.g. "reset" would sort before "timeout" though the table has it
         # the other way round) and made the declared order a dead letter.
@@ -149,7 +149,7 @@ def _summary_lines(document):
             "    failures: %s"
             % ", ".join(
                 "%d %s" % (failures[kind], kind)
-                for kind in exchange.FAILURE_KINDS
+                for kind in outcome.FAILURE_KINDS
                 if failures[kind]
             )
         )

@@ -19,7 +19,7 @@
 import os
 import pathlib
 
-from http_security_test.cli import exchange, text
+from http_security_test.cli import outcome, text
 
 SNAPSHOT = pathlib.Path(__file__).parent / "cli_terminal_snapshot.txt"
 
@@ -188,11 +188,11 @@ def test_a_single_result_gets_no_summary():
 
 
 def test_the_summary_orders_failure_kinds_by_failure_kinds_not_alphabetically():
-    # exchange.FAILURE_KINDS is (dns, refused, timeout, reset, tls, protocol,
+    # outcome.FAILURE_KINDS is (dns, refused, timeout, reset, tls, protocol,
     # other) -- timeout precedes reset there but follows it alphabetically,
     # so this pair is the one that tells sorted() apart from the declared
     # table.
-    assert exchange.FAILURE_KINDS.index("timeout") < exchange.FAILURE_KINDS.index(
+    assert outcome.FAILURE_KINDS.index("timeout") < outcome.FAILURE_KINDS.index(
         "reset"
     )
     document = {

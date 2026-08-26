@@ -22,18 +22,40 @@ and so are the header tables -- which headers exist and what a value means is
 knowledge. What a badly configured header is worth to a particular site is not,
 so a consumer is free to remap the ratings or ignore them entirely.
 
-Build the mapping with parse_headers() or parse_raw_headers() and hand it to
-report(), which returns the findings and the inventories as plain data ready to
-serialise. analyze_all() is the same analysis as Finding objects, and analyze()
-judges one header on its own.
+Build a Response -- from_bytes() for raw wire bytes, from_parts() for pieces
+already split out, headers as (name, value) pairs -- and a Request the same
+way, wrap both in an Exchange, and hand that to report():
+
+    >>> from http_security_test import Exchange, Request, Response, report
+    >>> response = Response.from_parts(
+    ...     status=200,
+    ...     headers=[("Strict-Transport-Security",
+    ...               "max-age=31536000; includeSubDomains")],
+    ... )
+    >>> request = Request.from_parts(url="https://example.com/")
+    >>> result = report(Exchange(request, response))
+
+report() returns the findings and the inventories as plain data ready to
+serialise. analyze() is the same analysis as Finding objects, and inventory()
+is what the response carries before anything is judged about it. mapping() is
+the lowercased name -> [values] view analyze() and inventory() derive from
+`exchange.response.headers` internally; parse_headers() and
+parse_raw_headers() build that same view directly from (name, value) pairs or
+a raw header block, for a caller who wants it without a Response around it.
 
 A finding carries no prose: it is `(header, code, data)`, and describe() turns
 one into a sentence from the catalog. A consumer that would rather write its own
 wording, or none, can read `data` and ignore the catalog entirely.
+
+`adaptors` and (later) `formats` are deliberately NOT imported here. Importing
+this package pulls in the analysis core and nothing else, which is what lets it
+sit in a Burp extension or a CI job without dragging a tool along. Reach for
+`from http_security_test import adaptors` when you want one.
 """
 
 from .catalog import CONSEQUENCES, MESSAGES, Consequence, describe
 from .csp import parse_csp
+from .exchange import Connection, Exchange
 from .findings import (
     CODE_CONSEQUENCES,
     CODE_HEADER,
@@ -48,7 +70,7 @@ from .findings import (
     taxonomy,
 )
 from .legacy import DEPRECATED_HEADERS
-from .message import parse_headers, parse_raw_headers
+from .message import Request, Response, mapping, parse_headers, parse_raw_headers
 from .policies import parse_feature_policy, parse_permissions_policy
 from .references import HEADER_DOCS, header_url, taxonomy_url
 from .reporting import finding_as_dict, report
@@ -57,7 +79,6 @@ from .response import (
     INFORMATION_HEADERS,
     SECURITY_HEADERS,
     analyze,
-    analyze_all,
     inventory,
 )
 
@@ -74,16 +95,20 @@ __all__ = [
     "MESSAGES",
     "SECURITY_HEADERS",
     "SEVERITIES",
+    "Connection",
     "Consequence",
+    "Exchange",
     "Finding",
+    "Request",
+    "Response",
     "analyze",
-    "analyze_all",
     "consequences",
     "describe",
     "finding_as_dict",
     "header_url",
     "identity",
     "inventory",
+    "mapping",
     "order_findings",
     "parse_csp",
     "parse_feature_policy",

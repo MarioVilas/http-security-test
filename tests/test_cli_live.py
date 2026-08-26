@@ -27,7 +27,9 @@ import urllib.request
 
 import pytest
 
-from http_security_test.cli import exchange, live
+from http_security_test.cli import live, outcome
+from http_security_test.exchange import Exchange
+from http_security_test.message import mapping
 
 OPTIONS = live.Options(
     method="GET",
@@ -100,7 +102,7 @@ CLASSIFY_CASES = [
 @pytest.mark.parametrize("error,kind", CLASSIFY_CASES)
 def test_classify(error, kind):
     assert live.classify(error) == kind
-    assert kind in exchange.FAILURE_KINDS
+    assert kind in outcome.FAILURE_KINDS
 
 
 def test_remote_disconnected_is_a_reset():
@@ -117,23 +119,27 @@ def test_an_http_error_is_a_response_not_a_failure():
     assert live.classify(error) is None
 
 
-def test_fetch_returns_an_iterable_of_one_exchange():
+def test_fetch_returns_an_iterable_of_one_facts_and_exchange_pair():
     opener = FakeOpener(FakeResponse("https://example.com/", pairs=[("Server", "nginx")]))
     result = live.fetch("https://example.com/", OPTIONS, opener=opener)
     assert len(result) == 1
-    assert isinstance(result[0], exchange.Exchange)
-    assert result[0].kind == "live"
-    assert result[0].target == "https://example.com/"
-    assert result[0].status == 200
+    facts, item = result[0]
+    assert isinstance(facts, outcome.Run)
+    assert isinstance(item, Exchange)
+    assert facts.kind == "live"
+    assert facts.target == "https://example.com/"
+    assert facts.status == 200
 
 
 def test_fetch_hands_over_headers_the_library_can_read():
     opener = FakeOpener(
         FakeResponse("https://example.com/", pairs=[("Server", "nginx"), ("Server", "b")])
     )
-    item = live.fetch("https://example.com/", OPTIONS, opener=opener)[0]
-    # parse_headers keeps duplicates as a list under a lowercased name.
-    assert item.headers["server"] == ["nginx", "b"]
+    _facts, item = live.fetch("https://example.com/", OPTIONS, opener=opener)[0]
+    # mapping() keeps duplicates as a list under a lowercased name, and the
+    # response's headers are the raw (name, value) pairs -- duplicates intact
+    # -- rather than an already-deduped dict.
+    assert mapping(item.response.headers)["server"] == ["nginx", "b"]
 
 
 def test_fetch_sends_the_user_agent_and_extra_headers():
@@ -150,24 +156,29 @@ def test_fetch_treats_an_error_status_as_a_response():
     error = urllib.error.HTTPError("https://example.com/", 403, "Forbidden", None, None)
     error.headers = email.message.Message()
     opener = FakeOpener(error)
-    item = live.fetch("https://example.com/", OPTIONS, opener=opener)[0]
-    assert item.status == 403
+    facts, _item = live.fetch("https://example.com/", OPTIONS, opener=opener)[0]
+    assert facts.status == 403
 
 
 def test_fetch_turns_a_transport_error_into_a_classified_failure():
     opener = FakeOpener(urllib.error.URLError(socket.gaierror(-2, "no such host")))
     result = live.fetch("https://nope.test/", OPTIONS, opener=opener)
     assert len(result) == 1
-    assert isinstance(result[0], exchange.Failure)
-    assert result[0].kind == "dns"
-    assert result[0].target == "https://nope.test/"
+    facts, item = result[0]
+    assert isinstance(facts, outcome.Failure)
+    assert item is None
+    assert facts.kind == "dns"
+    assert facts.target == "https://nope.test/"
 
 
 def test_raw_blobs_are_absent_unless_asked_for():
     opener = FakeOpener(FakeResponse("https://example.com/"))
-    item = live.fetch("https://example.com/", OPTIONS, opener=opener)[0]
-    assert item.raw_response is None
-    assert item.raw_request is None
+    _facts, item = live.fetch("https://example.com/", OPTIONS, opener=opener)[0]
+    assert item.response.raw is None
+    assert item.request.raw is None
+    # raw and fidelity travel together: no capture, so no fidelity claim either.
+    assert item.response.fidelity is None
+    assert item.request.fidelity is None
 
 
 def test_raw_blobs_round_trip_through_the_library_parser():
@@ -177,9 +188,54 @@ def test_raw_blobs_round_trip_through_the_library_parser():
     opener = FakeOpener(
         FakeResponse("https://example.com/", pairs=[("Server", "nginx")])
     )
-    item = live.fetch("https://example.com/", options, opener=opener)[0]
-    assert parse_raw_headers(item.raw_response)["server"] == ["nginx"]
-    assert item.raw_request.startswith("GET / HTTP/1.1")
+    _facts, item = live.fetch("https://example.com/", options, opener=opener)[0]
+    assert parse_raw_headers(item.response.raw)["server"] == ["nginx"]
+    # Request.from_bytes stores what it parsed, as bytes -- from_bytes()
+    # converts text to latin-1 bytes rather than keeping the caller's str.
+    assert item.request.raw.startswith(b"GET / HTTP/1.1")
+    # live.py never captures wire bytes -- urllib does not expose them, and
+    # raw_head()/raw_request() only rebuild an approximation (missing
+    # Accept-Encoding, Connection: close, etc.). --raw decides only whether
+    # that reconstruction is kept at all, never whether it is a capture, so
+    # both messages are labelled "reconstructed" -- never "capture" for bytes
+    # that were reassembled rather than actually crossing the wire.
+    assert item.response.fidelity == "reconstructed"
+    assert item.request.fidelity == "reconstructed"
+
+
+def test_raw_does_not_change_what_the_analyser_reads():
+    # A flag that controls evidence must not also control the analysis.
+    # Before the fix, --raw made the response headers reach the analyser by
+    # re-parsing raw_head()'s reassembled text through Response.from_bytes(),
+    # which has its own obs-fold handling and need not agree with
+    # email.message.Message's -- so the same response could be analysed two
+    # different ways depending only on whether --raw was passed. Headers now
+    # always come from response.headers.items(); the reassembled text is
+    # attached only as the `raw` blob.
+    #
+    # The fixture has to actually exercise that divergence or the assertion
+    # holds by accident on both code paths. An obs-folded value does: this
+    # package's own email.message.Message keeps it verbatim, byte for byte
+    # (verified separately), while raw_head()'s reassembly serialises it back
+    # onto the wire and a re-parse through Response.from_bytes() -> _parse_head()
+    # sees a continuation line and rejoins it with a single space, dropping the
+    # CRLF and the tab. Plain values round-trip identically either way and
+    # would let this test pass even against the pre-fix code -- see the
+    # mutation log in the fix report.
+    response = FakeResponse(
+        "https://example.com/",
+        pairs=[("Server", "nginx\r\n\tbuilt-from-source")],
+    )
+    _facts, plain = live.fetch(
+        "https://example.com/", OPTIONS, opener=FakeOpener(response)
+    )[0]
+    _facts, captured = live.fetch(
+        "https://example.com/", OPTIONS._replace(raw=True), opener=FakeOpener(response)
+    )[0]
+    assert plain.response.headers == captured.response.headers
+    # And pinned against reassembly specifically: the live value survives with
+    # its CRLF and tab intact, not rejoined into one line.
+    assert captured.response.headers == (("Server", "nginx\r\n\tbuilt-from-source"),)
 
 
 def test_the_chain_follows_an_in_scope_redirect():
@@ -284,11 +340,11 @@ def test_max_redirects_above_ten_is_honoured_past_urllibs_own_ceiling():
         port = server.server_address[1]
         options = OPTIONS._replace(max_redirects=20, patterns=("127.0.0.1",))
         target = "http://127.0.0.1:%d/a" % port
-        item = live.fetch(target, options)[0]
-        followed = [hop for hop in item.hops if hop.followed]
+        facts, _item = live.fetch(target, options)[0]
+        followed = [hop for hop in facts.hops if hop.followed]
         assert len(followed) == 20  # the flag is honoured well past urllib's 10
-        assert item.hops[-1].followed is False
-        assert item.hops[-1].refused == "max-redirects"
+        assert facts.hops[-1].followed is False
+        assert facts.hops[-1].refused == "max-redirects"
     finally:
         server.shutdown()
         thread.join(timeout=5)

@@ -20,22 +20,26 @@ GPL-3.0-or-later. Every source file carries the notice.
 findings.py    Finding, identity(), FINDING_SEVERITY, SEVERITIES, severity(), order_findings()
 catalog.py     MESSAGES + describe(): every sentence the package can produce
 references.py  header and taxonomy URLs -- the only module whose exported data is a URL table
-message.py     the header mapping model: parse_headers, parse_raw_headers, lookups
+message.py     Request, Response, the header mapping model: parse_headers, parse_raw_headers, mapping, lookups
+exchange.py    Exchange, Connection: one HTTP exchange, and the facts neither message carries
 csp.py         Content-Security-Policy                      (largest module)
 hsts.py        Strict-Transport-Security + the ONLY third-party dependency
 isolation.py   COOP / COEP / CORP / CORS
 policies.py    Permissions-Policy + Feature-Policy
 legacy.py      the obsolete headers
-response.py    tables, registry, cross-header rules, analyze_all, inventory, orphans
+response.py    tables, registry, cross-header rules, analyze, inventory, orphans
 reporting.py   report(): findings + inventories as plain data, ready for JSON
-__init__.py    public API
+__init__.py    public API -- the core only, see its own docstring
+
+adaptors.py    live library objects (requests, httpx, urllib3, ...) -> Request/Response
 
 cli/           the `hst` tool -- the only code here that opens a socket
   __init__.py    main(argv) -> int: parse, dispatch, exit codes
   meta.py        TOOL_NAME, tool_version(), USER_AGENT, LEVELS
   options.py     the entire argparse contract, one file to read the CLI
   commands.py    do_scan(), do_explain(): glue, one function per verb
-  exchange.py    Exchange, Hop, Failure: what crosses the input seam
+  outcome.py     Hop, Failure, Run: what the CLI's own fetch produced, apart
+                 from the message facts that now live in exchange.py
   scope.py       host patterns -- where a redirect may wander
   live.py        the live source: urllib, redirects, TLS, proxy
   run.py         run_document(): results -> the JSON run envelope
@@ -43,32 +47,28 @@ cli/           the `hst` tool -- the only code here that opens a socket
   writers.py     format table, -o resolution, the writers
 ```
 
-`cli/` is flat for the same reason the analyser is. `sources/` and `formats/`
-directories become worth having at three implementations each; today they would
-be ceremony. When the HAR parser lands, `har.py` sits beside `live.py`.
+`cli/` is flat for the same reason the analyser is. `formats/` -- Burp XML,
+HAR, SAZ, WCAT -- is a fourth layer, between `adaptors` and `cli`, and today it
+is a recorded decision rather than a directory: zero parsers exist, and this
+project's rule is that a directory earns its place at three implementations.
+The first one lands in `formats/`, not in `cli/` beside `live.py` as an earlier
+version of this paragraph said. `cli/live.py` itself is the one deliberate
+exception to the layering below: it stays in `cli/` rather than becoming a
+peer layer, because the opening paragraph's claim -- *"it never fetches
+anything"* -- has to stay unconditional. Promoting `live` out of `cli/` would
+soften that to "unless you import the part that does," and the sentence a Burp
+extension author reads while auditing what they are embedding matters more
+than the symmetry.
 
-Dependencies run one way and there are no cycles:
+Dependencies run one way, lowest layer first, and there are no cycles. Four
+layers, each free to import its own layer and anything below it, never above:
 
 ```
-message, catalog, references  ->  (nothing)
-findings   ->  catalog (lazily, inside taxonomy(); catalog imports nothing, so
-                this is not a cycle -- the import is deferred to keep catalog
-                free to import findings later)
-csp, hsts, isolation, legacy, policies  ->  findings [, message]
-response   ->  all of the above except catalog
-reporting  ->  response, findings, catalog
-
-cli.exchange, cli.scope  ->  (nothing)
-cli.meta     ->  SEVERITIES, from the public API
-cli.run      ->  cli.meta
-cli.text     ->  cli.exchange, cli.meta
-cli.writers  ->  cli.text
-cli.live     ->  cli.exchange, cli.scope, parse_headers
-cli.commands ->  all of the above + report(), FINDING_SEVERITY, MESSAGES,
-                  CODE_HEADER, CONSEQUENCES, consequences, references,
-                  taxonomy, hsts
-cli.options  ->  cli.commands, cli.meta
-cli.__init__ ->  cli.options
+core       findings, catalog, message, references, csp, hsts, isolation,
+           policies, legacy, response, reporting, exchange   -> stdlib only
+adaptors   live library objects -> core types                -> imports core
+formats    Burp XML, HAR, SAZ, WCAT                          -> NOT BUILT YET
+cli        argv, orchestration, writers, live.py             -> imports all above
 ```
 
 `cli.meta` holds `LEVELS = tuple(reversed(SEVERITIES))` rather than restating
@@ -76,9 +76,20 @@ the severity vocabulary, which is why `options` needs no import of the renderer
 just to spell `--min-level`'s choices — and why adding a level upstream cannot
 silently desynchronise the two.
 
-**Nothing outside `cli/` may import `cli`**, and a test asserts it by walking
-the AST of every analyser module. That single grep is what keeps the claim in
-the opening paragraph true.
+**Nothing outside `cli/` may import `cli`, and nothing in `core` may import
+`adaptors`** -- both are the same rule at different layers, and
+`test_imports_only_ever_run_downhill` (`tests/test_cli_structure.py`) is what
+enforces it. It classifies every import in every module by *which layer it
+names* -- relative (`from .cli import x`) and absolute
+(`import http_security_test.cli`) alike -- and fails on any import pointing
+uphill, which is a strictly stronger claim than the single forbidden edge the
+test used to name: it also catches a `formats/` parser reaching past
+`adaptors` into `cli`, the day one exists.
+`test_importing_the_library_does_not_import_the_adaptors_or_the_cli`, in the
+same file, checks the operational half of the claim: importing the package in
+a fresh subprocess must not pull `http_security_test.cli` or
+`http_security_test.adaptors` into `sys.modules`. Together the two are what
+keep the claim in the opening paragraph true.
 
 `catalog.py` is a leaf on purpose and **no analyser may import it**. The
 analysers emit `(header, code, data)` and hold no prose; only `reporting.py` and
@@ -184,8 +195,10 @@ mutation-verified.
 
 ## The header mapping (easy to get wrong)
 
-`present` maps a lowercased name to a **list** of values. `analyze_all` accepts a
-plain string per header too, so the ordinary caller is unaffected.
+`present` maps a lowercased name to a **list** of values, and `mapping()` is what
+builds it -- from the `(name, value)` pairs a `Request` or `Response` carries --
+so a header sent once is still a one-item list and the ordinary caller never has
+to special-case it.
 
 Build it with `parse_headers(pairs)` or `parse_raw_headers(raw)` — never with a
 dict comprehension. Verified stdlib behaviour:
@@ -195,6 +208,16 @@ dict comprehension. Verified stdlib behaviour:
 | `getheaders()` | both pairs, duplicates intact |
 | `Message["name"]` | the **first** |
 | `{k: v for k, v in pairs}` | the **last** |
+| `CaseInsensitiveDict[name]` | **comma-joined** |
+
+The fourth row is `requests`' own `.headers` (urllib3's `HTTPHeaderDict`
+underneath), and it does not merely lose a duplicate the way the first three
+do -- it corrupts what is left. Two `Set-Cookie` values, only one of them
+carrying an `Expires` date, comma-join into one string whose own commas are
+now indistinguishable from the join: re-splitting on `, ` yields **three**
+pieces for **two** cookies, because the date's internal comma looks exactly
+like a second join point. `adaptors.from_requests()` exists to route around
+this by reading `.raw.headers` instead, never to parse through it.
 
 Repeated headers are not a corner case. **Repeated CSP is enforced
 conjunctively**: a coverage gap fires only if *no* policy closes it, a weakness
@@ -208,9 +231,11 @@ wins, so no suppression can be earned from it.
 
 ## The output schema
 
-`report(present, secure=True, host=None, message=True, raw=None,
-request_raw=None)` is the whole analysis of one exchange as plain data —
-strings, numbers, lists, dicts, no encoder needed:
+`report(exchange, message=True)` is the whole analysis of one exchange as plain
+data — strings, numbers, lists, dicts, no encoder needed. `raw` and `request_raw`
+are no longer separate parameters: those blobs come straight from
+`exchange.response.raw` and `exchange.request.raw`, as the `raw` / `fidelity`
+bullets below explain:
 
 ```json
 {
@@ -226,9 +251,10 @@ strings, numbers, lists, dicts, no encoder needed:
     },
     "references": {"headers": ["Clear-Site-Data"],
                     "taxonomy": ["CAPEC-204", "CWE-525"]},
-    "raw": "<base64>"
+    "raw": "<base64>",
+    "fidelity": "capture"
   },
-  "request": {"raw": "<base64>"}
+  "request": {"raw": "<base64>", "fidelity": "capture"}
 }
 ```
 
@@ -297,6 +323,22 @@ Decisions inside that shape, each of which had an alternative:
   about the request, no `request` key. The rule that reconciles this with `data`
   always being `{}`: content this package *derived* is always present, content
   it was merely *given* is present only if it was given.
+- **`fidelity` never travels without `raw`, but `raw` can travel without
+  `fidelity`.** Three values: `capture` is the bytes exactly as they crossed
+  the wire; `reconstructed` is a reassembly from a parsed model — every
+  HTTP/2 exchange counts, since h2 has no start line for anything to have
+  captured, so whatever rendered one had to invent it; `redacted` is a
+  reconstruction known to have lost content. It is taken verbatim from
+  `exchange.request.raw` / `exchange.response.raw` and never validated
+  against that vocabulary — this package has no way to confirm what bytes
+  really crossed a wire it never touched, so checking the string would catch
+  a typo while remaining unable to catch a lie. The biconditional a reader
+  expects does not hold: a statement with no blob says nothing, so `fidelity`
+  is absent whenever `raw` is, but the reverse is not required — a caller may
+  hand over bytes (`Response.from_parts(raw=b"...")`, say) without saying
+  what kind they are, and `raw` is then present with `fidelity` absent. Absent
+  beats empty either way: both fields are content the caller *gave*, not
+  content this package derived, so each is present only if it was given.
 - **`consequences` is per finding, `[]` included, the same rule as `data`.** A
   hint about potential risk, never a claim it is reachable — every entry's
   wording says so — so a consumer filtering by risk never has to test for the
@@ -529,6 +571,12 @@ an odd one, and the odd one is loud anyway.
   entry matched a 12-space constructor argument and corrupted a `Finding`). And an
   anchor edited earlier in the session no-ops without complaint. Assert the anchor
   exists and is unique before replacing.
+- **`urllib.parse` is core; `urllib.request` is not.** `exchange.py` imports
+  `urllib.parse` for `scheme()` and `host()` — string parsing, no socket — and
+  that belongs in `core` same as any other stdlib import; `urllib.request` is
+  what opens one, and only `cli/live.py` may import it. Worth a sentence of its
+  own because the module name alone, seen out of context, reads like exactly
+  the breach the opening paragraph promises never happens.
 
 ## Human's preferences and standing rules
 
@@ -728,8 +776,14 @@ broken by an agent that had read the section and filed it under taste.
   `text/html`, rated `note`. Real-world impact is negligible now (the injection
   needed UTF-7, and `<meta charset>` satisfies it invisibly), but tools still
   flag it, so the fact is reported without the noise a warning would make.
-  Absence of the header is not reported at all: `analyze_all` sees no status
-  line and a 204 or 304 carries no representation.
+  Absence of the header is still not reported -- that has not changed -- but no
+  longer because the status is invisible: `analyze()` reads
+  `exchange.response.status` now, the same visibility that closed the
+  `--all-hops` gap. A 204 or 304 still carries no representation, so that
+  survives as the *shape* the rule would take if `Content-Type` ever joined
+  `SECURITY_HEADERS` -- what is gone is the claim that the gap could not be
+  closed. This is a deliberate choice now, not a constraint, and revisiting it
+  is the human's call.
 - **`X-DNS-Prefetch-Control` is inventoried, never a gap.** It is in
   `DEPRECATED_HEADERS` and emits one `note`, `xdpc-nonstandard`. No finding can
   do better: MDN BCD has it as Chrome 1 and Firefox 2 with no partial or pref
@@ -1003,26 +1057,48 @@ broken by an agent that had read the section and filed it under taste.
   consequence to know: a consumer calling `report()` directly and dumping it to
   JSON has built its own artifact and owns its versioning; this package does not
   stamp one into the dict.
-- **`--all-hops`, blocked on the analyser.** The CLI can analyse every hop of a
-  redirect chain and the envelope is specified for it, but it is reserved rather
-  than shipped, because a bare 301 currently produces **six warnings** —
-  `csp-missing`, `coop-missing`, `corp-missing`, `rp-missing`, `xcto-missing`,
-  `xfo-missing` — on a response that carries no representation for any of them
-  to protect. Measured, not guessed. That is principle 4, once per hop. The
-  cause is structural and already recorded: `analyze_all` sees no status line,
-  which is the same reason absent `Content-Type` is not reported. Closing it
-  means an optional status on `analyze_all()` — most naturally as part of the
-  TODO item *"change api to expect full request/response pairs first"*, which
-  brings the status line along with everything else. Note HSTS is correctly
-  *absent* from that list: on the https legs of a chain a redirect is precisely
-  where HSTS matters, so per-hop analysis is genuinely valuable and it is only
-  the representation-scoped headers that misfire.
+- **`--all-hops`, no longer blocked on the analyser.** The CLI can analyse every
+  hop of a redirect chain and the envelope is specified for it; it stays
+  reserved rather than shipped (see **Status**), but the analyser-side reason it
+  used to be blocked is gone. The blocker was structural: a bare 301 used to
+  produce **six warnings** — `csp-missing`, `coop-missing`, `corp-missing`,
+  `rp-missing`, `xcto-missing`, `xfo-missing` — on a response that carries no
+  representation for any of them to protect, because the old `analyze_all`
+  never saw a status line. `analyze()` now reads `exchange.response.status`
+  directly (`_report_missing()`'s third argument), so per-hop analysis no
+  longer misfires on the representation-scoped headers. Note HSTS was always
+  correctly *absent* from that list: on the https legs of a chain a redirect is
+  precisely where HSTS matters, so per-hop analysis is genuinely valuable and it
+  was only the representation-scoped headers that misfired. Shipping the flag
+  itself is CLI orchestration work — walking `Run.hops`, building one
+  `Exchange` per hop, deciding how N reports nest in the envelope — not
+  analyser work, which is why it is still reserved.
+- **Three finding families this task's types newly make checkable**, none
+  designed or implemented yet:
+  - **Protocol hygiene.** `Exchange.connection` carries the host, IP, port and
+    scheme actually connected to, deliberately apart from the `Host:` header a
+    request carries (`exchange.py`'s own docstring explains why: `Host:` can be
+    forged, and testing that on purpose is a thing security tools do). A
+    finding comparing the two — a `Host:` that disagrees with
+    `connection.host` — was unwritable before this task, because nothing
+    carried the fact it would be checked against.
+  - **Verb/preflight.** Every CORS rule so far reads the *response* only,
+    because nothing carried the *request's* method. `Request.method` now does,
+    which is what a preflight check needs: compare an `OPTIONS` request's
+    `Access-Control-Request-Method` against the response's
+    `Access-Control-Allow-Methods` and say whether the verb actually used would
+    have been allowed.
+  - **TRACE / XST.** Cross-site tracing needs the same new fact from the other
+    side: whether the *request* method was `TRACE` and whether the response
+    reflected it back. `Request.method` makes the premise checkable; nothing
+    reads it yet.
 - **File input for the CLI** — `read` verb, Burp XML, HAR, SAZ, WCAT. The seam
-  is designed and the payload shape fixed (`cli/exchange.py`), deliberately with
-  no registry: every one of those formats is a multi-exchange container carrying
-  both request and response, so a source yields an *iterable* and one live
-  target yields a tuple of one. Getting the payload right was the commitment;
-  the registry is a few lines whenever the second source lands.
+  is designed and the payload shape fixed (`exchange.py`'s `Exchange`),
+  deliberately with no registry: every one of those formats is a multi-exchange
+  container carrying both request and response, so a source yields an
+  *iterable* and one live target yields a tuple of one. Getting the payload
+  right was the commitment; the registry is a few lines whenever the second
+  source lands, in `formats/` — see **Layout**.
 
 ## Reference material on disk
 
@@ -1756,6 +1832,15 @@ deprecated and caching inventories — 30 of them via MDN, 3 via a permanent
 spec URL, 7 via http.dev. That is deliberately narrower than "or an inventory
 can name": `information` alone names 91 headers and none of them resolve.
 
+**Layering:** four layers, lowest first — `core` (12 modules, `exchange.py`
+newly among them), `adaptors` (one module, `adaptors.py`, converting a dozen
+live HTTP libraries' response objects into `Request`/`Response`), `formats`
+(recorded, not built — see **Layout**), `cli` (10 modules, `cli/outcome.py`
+replacing `cli/exchange.py`). `__init__.py` exports the core only.
+`test_imports_only_ever_run_downhill` and
+`test_importing_the_library_does_not_import_the_adaptors_or_the_cli`
+(`tests/test_cli_structure.py`) pin both halves of the claim.
+
 **CLI:** `hst` ships the `scan` and `explain` verbs over 10 modules in `cli/`,
 standard library only. Reserved and documented but not implemented: the `read`
 verb and its file parsers, `--probe`, `--all-hops`, `--include-report-only`,
@@ -1768,7 +1853,7 @@ the long-form descriptions to land with the SARIF writer's `fullDescription`
 field removed the only thing a verbosity switch would have gated — do not
 reserve one now.
 
-**Tests:** 555 passing across 317 test functions, 114 of them CLI. `ruff check`
+**Tests:** 602 passing across 366 test functions, 112 of them CLI. `ruff check`
 clean. No test touches the network, with one deliberate exception: the redirect-
 limit test binds a loopback `http.server` on an ephemeral port, because urllib's
 own redirect bookkeeping cannot be tested any other way.

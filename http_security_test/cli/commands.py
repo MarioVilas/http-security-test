@@ -30,8 +30,10 @@ from .. import (
     report,
     taxonomy,
 )
+from ..exchange import host
 from ..hsts import hstspreload
-from . import exchange, live, meta, run, scope, text, writers
+from ..message import mapping
+from . import live, meta, outcome, run, scope, text, writers
 
 
 def do_explain(args):
@@ -97,21 +99,22 @@ def _exit_code(document, fail_on):
     return 0
 
 
-def _rate_limited(item):
+def _rate_limited(facts, item):
     """A note for 429 and 503, or None.
 
     The one retry signal that is a fact rather than a prediction: RFC 9110
     defines both statuses as "try later" and Retry-After as when. Echoing it
     guesses nothing, unlike sniffing a response for a WAF interstitial, which
-    this tool deliberately does not do.
+    this tool deliberately does not do. `status` and `target` are run facts;
+    `Retry-After` lives on the message, so it takes both.
     """
-    if item.status not in (429, 503):
+    if facts.status not in (429, 503):
         return None
-    values = item.headers.get("retry-after") or []
+    values = mapping(item.response.headers).get("retry-after") or []
     when = "; Retry-After: %s" % values[0] if values else ""
     return "%s: HTTP %s -- the server is asking you to come back later%s" % (
-        item.target,
-        item.status,
+        facts.target,
+        facts.status,
         when,
     )
 
@@ -137,7 +140,7 @@ def do_scan(args, source=None):
         return 2
 
     targets = _targets(args.url)
-    patterns = scope.resolve(args.scope, [exchange.host(t) for t in targets])
+    patterns = scope.resolve(args.scope, [host(t) for t in targets])
     # The one line of output that appears whether or not anything is found,
     # and what makes the guard auditable rather than mysterious -- so it is
     # ungated by `show` and always goes to stderr, same as the diagnostics
@@ -175,32 +178,18 @@ def do_scan(args, source=None):
     started = run.timestamp()
     results = []
     for target in targets:
-        for item in source(target, options):
-            if isinstance(item, exchange.Failure):
+        for facts, item in source(target, options):
+            if isinstance(facts, outcome.Failure):
                 print(
-                    "%s: %s: %s" % (item.target, item.kind, item.message),
+                    "%s: %s: %s" % (facts.target, facts.kind, facts.message),
                     file=sys.stderr,
                 )
-                results.append(run.failed(item))
+                results.append(run.failed(facts))
                 continue
-            note = _rate_limited(item)
+            note = _rate_limited(facts, item)
             if note:
                 print(note, file=sys.stderr)
-            # secure and host come from THIS response's URL, not the typed
-            # target: on a redirect chain the plaintext leg must be analysed
-            # with secure=False, and the last leg may have another hostname.
-            results.append(
-                run.analysed(
-                    item,
-                    report(
-                        item.headers,
-                        secure=exchange.secure(item.url),
-                        host=exchange.host(item.url),
-                        raw=item.raw_response,
-                        request_raw=item.raw_request,
-                    ),
-                )
-            )
+            results.append(run.analysed(facts, report(item)))
     document = run.run_document(results, started, run.timestamp())
 
     if show:

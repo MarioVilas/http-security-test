@@ -33,9 +33,10 @@ numbers, lists and dicts. The shape is:
           "caching": {name: value}
         },
         "references": {"headers": [...], "taxonomy": [...]},
-        "raw": "<base64>"
+        "raw": "<base64>",
+        "fidelity": "capture"
       },
-      "request": {"raw": "<base64>"}
+      "request": {"raw": "<base64>", "fidelity": "capture"}
     }
 
 The two sides are nested rather than flat because a header name does not say
@@ -67,7 +68,22 @@ names no header for `references` to collect. Deliberate, not a bug -- see
 `CODE_HEADER`'s own comment in `findings.py`.
 
 The `raw` blobs are optional passthrough: this package never fetches anything,
-so they are whatever the caller hands over. Two things about them.
+so they are whatever the caller hands over. `fidelity` rides beside `raw` and
+states what kind of bytes they are -- `capture` is the bytes as they crossed
+the wire, `reconstructed` is a reassembly from a parsed model (every HTTP/2
+exchange, since h2 has no start line for anything to have captured),
+`redacted` is a reconstruction known to have lost content. It is the caller's
+own claim, taken from `exchange.request.raw` / `exchange.response.raw`
+verbatim and never checked against that vocabulary: this package has no way to
+confirm what bytes really crossed a wire it never touched, so validating the
+string would reject a typo while remaining unable to reject a lie. `fidelity`
+never appears without `raw` -- a statement with no blob says nothing, so
+`_attach_raw()` only ever writes it once `raw` is already set. The reverse
+does not hold: `raw` may appear with no `fidelity` at all, when the caller
+supplied bytes and did not say what kind they are. Absent-beats-empty is why
+the asymmetry is correct rather than a bug -- `raw` is passthrough content the
+caller gave, `fidelity` is a further, optional claim about it, so it is
+missing exactly when the caller left it unsaid, not exactly when `raw` is.
 
 They make a report reproducible. `raw` is exactly what `parse_raw_headers()`
 accepts, so an archived report can be re-analysed by a later version of this
@@ -99,7 +115,7 @@ from .findings import (
     severity,
     taxonomy,
 )
-from .response import analyze_all, inventory
+from .response import analyze, inventory
 
 
 def _blob(raw):
@@ -153,27 +169,45 @@ def _references(findings):
     }
 
 
-def report(present, secure=True, host=None, message=True, raw=None, request_raw=None):
+def report(exchange, message=True):
     """Findings and inventories for one exchange, ready to serialise.
 
-    `present`, `secure` and `host` mean what they mean to analyze_all. Findings
-    come out worst first, which is the order a reader wants and the order the
-    tables already guarantee is stable from run to run.
+    Findings come out worst first, which is the order a reader wants and the
+    order the tables already guarantee is stable from run to run.
 
-    `raw` and `request_raw` are the verbatim messages, as bytes or text, and are
-    base64-encoded here so that one encoding decision is made in one place.
-    Read the module docstring before passing either: they carry credentials.
+    The `raw` and `request` blobs in the schema above come straight from
+    `exchange.response.raw` and `exchange.request.raw` -- whatever either
+    message's own `raw` field carries, as bytes or text, base64-encoded here
+    so that one encoding decision is made in one place. `fidelity` rides
+    beside `raw`, taken verbatim from the same message and never validated --
+    see the module docstring. Read the module docstring before setting either
+    `raw`: they carry credentials.
     """
-    findings = order_findings(analyze_all(present, secure=secure, host=host))
+    findings = order_findings(analyze(exchange))
     response = {
         "findings": [finding_as_dict(f, message=message) for f in findings],
-        "inventory": inventory(present),
+        "inventory": inventory(exchange),
         "references": _references(findings),
     }
-    if raw is not None:
-        response["raw"] = _blob(raw)
+    _attach_raw(response, exchange.response)
 
     result = {"response": response}
-    if request_raw is not None:
-        result["request"] = {"raw": _blob(request_raw)}
+    request = {}
+    _attach_raw(request, exchange.request)
+    if request:
+        result["request"] = request
     return result
+
+
+def _attach_raw(target, message):
+    """The raw blob and its fidelity, or neither.
+
+    `fidelity` is whatever the message carries, unvalidated: it is a claim
+    about provenance this package cannot verify, so checking it against
+    `exchange.FIDELITY` would reject a typo while doing nothing about a lie.
+    """
+    if message.raw is None:
+        return
+    target["raw"] = _blob(message.raw)
+    if message.fidelity is not None:
+        target["fidelity"] = message.fidelity

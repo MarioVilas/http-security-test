@@ -33,8 +33,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .. import parse_headers
-from . import exchange, scope
+from ..exchange import Exchange, host
+from ..message import Request, Response
+from . import outcome, scope
 
 # Everything the fetcher needs, so this module never sees an argparse Namespace.
 Options = collections.namedtuple(
@@ -99,7 +100,7 @@ class _Chain(urllib.request.HTTPRedirectHandler):
     def _refuse(self, origin, code, newurl, why):
         # Returns None (implicit): urllib then surfaces the 3xx itself, which we
         # go on to analyse like any other response.
-        self.hops.append(exchange.Hop(origin, code, newurl, False, why))
+        self.hops.append(outcome.Hop(origin, code, newurl, False, why))
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         origin = req.full_url
@@ -107,9 +108,9 @@ class _Chain(urllib.request.HTTPRedirectHandler):
             return self._refuse(origin, code, newurl, "no-redirect")
         if len(self.hops) >= self.limit:
             return self._refuse(origin, code, newurl, "max-redirects")
-        if not scope.allows(self.patterns, exchange.host(newurl)):
+        if not scope.allows(self.patterns, host(newurl)):
             return self._refuse(origin, code, newurl, "scope")
-        self.hops.append(exchange.Hop(origin, code, newurl, True, None))
+        self.hops.append(outcome.Hop(origin, code, newurl, True, None))
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -166,10 +167,15 @@ def raw_request(url, options):
 
 
 def fetch(target, options, opener=None, chain=None):
-    """The exchange for one target, or one Failure. Always an iterable.
+    """The run facts and analysed exchange for one target, or one failure.
 
-    An iterable of one, because every file format this seam will grow is a
-    multi-exchange container and two shapes would have to be unified badly.
+    Always an iterable of one `(facts, exchange)` pair -- because every file
+    format this seam will grow is a multi-exchange container and two shapes
+    would have to be unified badly -- except that on failure there is no
+    exchange to pair, so the second element is None: `(Failure, None)`. Either
+    way a caller writes `for facts, item in source(target, options):` and
+    tests `isinstance(facts, outcome.Failure)` to tell the two apart, never
+    needing to know which shape it is looking at before unpacking it.
     """
     if opener is None:
         opener, chain = build_opener(options)
@@ -185,7 +191,8 @@ def fetch(target, options, opener=None, chain=None):
     except urllib.error.HTTPError as error:
         response = error  # a 3xx we would not follow, or any 4xx/5xx
     except Exception as error:  # a pentest target fails in many ways
-        return (exchange.Failure(target, classify(error) or "other", str(error)),)
+        failure = outcome.Failure(target, classify(error) or "other", str(error))
+        return ((failure, None),)
 
     if options.method != "HEAD":
         # Drained, not kept; nothing here reads a body. Any failure while
@@ -196,16 +203,46 @@ def fetch(target, options, opener=None, chain=None):
     response.close()
 
     url = getattr(response, "url", None) or target
-    return (
-        exchange.Exchange(
-            kind="live",
-            target=target,
-            url=url,
-            status=getattr(response, "status", None) or getattr(response, "code", None),
-            reason=getattr(response, "reason", "") or "",
-            headers=parse_headers(response.headers.items()),
-            hops=tuple(chain.hops) if chain is not None else (),
-            raw_response=raw_head(response) if options.raw else None,
-            raw_request=raw_request(url, options) if options.raw else None,
-        ),
+    status = getattr(response, "status", None) or getattr(response, "code", None)
+    reason = getattr(response, "reason", "") or ""
+
+    # live.py never captures wire bytes: urllib does not expose them, and
+    # raw_head()/raw_request() rebuild an approximation from what was parsed
+    # (see their own docstrings). The rebuild demonstrably differs from what
+    # crossed the wire -- the real request carries `Accept-Encoding: identity`
+    # (http.client.HTTPConnection.putrequest) and `Connection: close`
+    # (urllib.request.AbstractHTTPHandler.do_open), and raw_request() emits
+    # neither. So the label is "reconstructed", never "capture", and only
+    # present at all when --raw asked for the bytes to be kept.
+    raw_response_text = raw_head(response) if options.raw else None
+    raw_request_text = raw_request(url, options) if options.raw else None
+
+    # Headers reach the analyser from response.headers.items() always,
+    # --raw or not -- the reassembled text in raw_response_text is attached
+    # as evidence, via `raw`, and is never re-parsed to build the headers
+    # analyze() sees. Re-parsing it would let --raw change the analysis
+    # itself: Response.from_bytes() has its own obs-fold handling, which
+    # does not necessarily agree with email.message.Message's, and a flag
+    # that controls evidence must not also control what gets analysed.
+    response_message = Response.from_parts(
+        status=status,
+        reason=reason,
+        headers=list(response.headers.items()),
+        raw=raw_response_text,
+        fidelity="reconstructed" if raw_response_text is not None else None,
     )
+    request_message = (
+        Request.from_bytes(raw_request_text, url=url, fidelity="reconstructed")
+        if raw_request_text is not None
+        else Request.from_parts(url=url)
+    )
+
+    facts = outcome.Run(
+        kind="live",
+        target=target,
+        url=url,
+        status=status,
+        reason=reason,
+        hops=tuple(chain.hops) if chain is not None else (),
+    )
+    return ((facts, Exchange(request_message, response_message)),)

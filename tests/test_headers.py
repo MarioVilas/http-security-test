@@ -25,7 +25,100 @@ from unittest import mock
 import pytest
 
 import http_security_test as headers
-from http_security_test import hsts, policies, references
+from http_security_test import hsts, message, policies, references, response
+from http_security_test.exchange import Exchange
+from http_security_test.message import Request, Response
+
+
+def _ex(headers=None, url="https://example.com/", status=200, raw=None, request_raw=None):
+    """One exchange from a header mapping, for the tests that predate types.
+
+    `raw` and `request_raw` feed the response's and request's own `raw` field,
+    which is what `report()` now reads instead of taking `raw=`/`request_raw=`
+    arguments of its own.
+    """
+    pairs = []
+    for name, value in (headers or {}).items():
+        for one in ([value] if isinstance(value, str) else value):
+            pairs.append((name, one))
+    return Exchange(
+        Request.from_parts(url=url, raw=request_raw),
+        Response.from_parts(status=status, headers=pairs, raw=raw),
+    )
+
+
+def _url(secure=True, host=None):
+    """A URL whose scheme and host analyze() reads back out, for the tests
+    that predate Exchange and used to pass secure=/host= directly."""
+    return "%s://%s/" % ("https" if secure else "http", host or "example.com")
+
+
+def test_analyze_takes_an_exchange_and_returns_findings():
+    codes = {f.code for f in headers.analyze(_ex())}
+    assert "csp-missing" in codes
+
+
+def test_the_scheme_comes_from_the_url_not_from_an_argument():
+    # Over plaintext a browser ignores HSTS entirely, so its absence is not a
+    # defect. That used to be `secure=False`; it is now a fact about the URL.
+    over_tls = {f.code for f in headers.analyze(_ex(url="https://example.com/"))}
+    plaintext = {f.code for f in headers.analyze(_ex(url="http://example.com/"))}
+    assert "hsts-missing" in over_tls
+    assert "hsts-missing" not in plaintext
+
+
+def test_an_unparseable_url_disables_the_scheme_dependent_check():
+    # A missing input disables the checks that need it. It never defaults them.
+    codes = {f.code for f in headers.analyze(_ex(url="::::"))}
+    assert "hsts-missing" not in codes
+
+
+def test_inventory_takes_an_exchange():
+    found = headers.inventory(_ex({"X-Frame-Options": "DENY"}))
+    assert found["security"]["X-Frame-Options"] == "DENY"
+    assert "Content-Security-Policy" in found["missing"]
+
+
+def test_the_old_entry_points_are_gone():
+    # No compatibility shim was wanted. A caller who kept the old call gets an
+    # AttributeError now rather than a silently different analysis.
+    assert not hasattr(headers, "analyze_all")
+
+
+# The six representation-scoped headers a bare redirect used to be scolded for.
+REPRESENTATION_MISSING = {
+    "csp-missing", "coop-missing", "corp-missing",
+    "rp-missing", "xcto-missing", "xfo-missing",
+}
+
+
+def test_a_bare_redirect_is_not_scolded_for_headers_it_has_nothing_to_protect():
+    # Measured before the fix: a bare 301 emitted all six. That is principle 4
+    # once per hop, and it is why --all-hops was blocked.
+    codes = {f.code for f in headers.analyze(_ex({"Location": "https://example.com/next"},
+                                                  status=301))}
+    assert not (codes & REPRESENTATION_MISSING)
+
+
+def test_hsts_is_still_demanded_on_a_redirect():
+    # A redirect over https is precisely where HSTS matters, so it is NOT in
+    # the suppressed set. Getting this wrong would make per-hop analysis
+    # worthless rather than merely noisy.
+    codes = {f.code for f in headers.analyze(_ex({}, status=301))}
+    assert "hsts-missing" in codes
+
+
+def test_a_200_still_gets_all_six():
+    codes = {f.code for f in headers.analyze(_ex({}, status=200))}
+    assert REPRESENTATION_MISSING <= codes
+
+
+def test_an_unknown_status_still_gets_all_six():
+    # Absent status disables nothing: not knowing the status is not evidence
+    # that the response carried no representation.
+    codes = {f.code for f in headers.analyze(_ex({}, status=None))}
+    assert REPRESENTATION_MISSING <= codes
+
 
 # ---------------------------------------------------------------------------
 # Per-header analyzers
@@ -348,29 +441,29 @@ ANALYZER_CASES = [
 
 @pytest.mark.parametrize("name,value,expected", ANALYZER_CASES)
 def test_analyze_returns_expected_codes(name, value, expected):
-    assert [f.code for f in headers.analyze(name, value)] == expected
+    assert [f.code for f in response._analyze_header(name, value)] == expected
 
 
 def test_analyze_ignores_unknown_headers():
-    assert headers.analyze("X-Whatever", "anything") == []
+    assert response._analyze_header("X-Whatever", "anything") == []
 
 
 def test_analyze_ignores_none_values():
-    assert headers.analyze("X-Frame-Options", None) == []
+    assert response._analyze_header("X-Frame-Options", None) == []
 
 
 def test_inline_findings_name_the_directive_actually_consulted():
     """The offending list may be spelled under a directive the operator never
     wrote, so pointing at script-src when the sources came from default-src
     sends them looking for something that is not there."""
-    inherited = headers.analyze(
+    inherited = response._analyze_header(
         "Content-Security-Policy", "default-src 'unsafe-inline'; base-uri 'none'"
     )
     finding = next(f for f in inherited if f.code == "csp-unsafe-inline")
     assert finding.data == {"directives": ["default-src"]}
     assert "in default-src" in headers.describe(finding)
 
-    overridden = headers.analyze(
+    overridden = response._analyze_header(
         "Content-Security-Policy",
         "default-src 'none'; script-src 'self'; script-src-elem 'unsafe-inline'",
     )
@@ -382,7 +475,7 @@ def test_inline_findings_name_the_directive_actually_consulted():
 def test_preload_message_reads_cleanly_when_both_requirements_are_unmet():
     finding = next(
         f
-        for f in headers.analyze("Strict-Transport-Security", "max-age=300; preload")
+        for f in response._analyze_header("Strict-Transport-Security", "max-age=300; preload")
         if f.code == "hsts-preload-ineffective"
     )
     assert finding.data["unmet"] == ["include-subdomains", "max-age"]
@@ -392,7 +485,7 @@ def test_preload_message_reads_cleanly_when_both_requirements_are_unmet():
 
 
 def test_findings_name_their_header():
-    findings = headers.analyze("Strict-Transport-Security", "max-age=1")
+    findings = response._analyze_header("Strict-Transport-Security", "max-age=1")
     assert all(f.header == "Strict-Transport-Security" for f in findings)
     assert all(headers.describe(f) for f in findings)
 
@@ -407,7 +500,7 @@ SAFE_CSP = "default-src 'none'; base-uri 'none'"
 
 
 def framing_codes(present):
-    codes = [f.code for f in headers.analyze_all(present)]
+    codes = [f.code for f in headers.analyze(_ex(present))]
     return sorted(c for c in codes if "frame" in c or c.startswith("xfo"))
 
 
@@ -449,55 +542,55 @@ def test_every_security_header_is_reported_missing_when_none_are_present():
     # of same-origin, so on a response that asks for no isolation its absence is
     # the ordinary state of the web rather than a gap. It is still listed in the
     # caller's `missing` inventory -- that is a fact -- it just earns no finding.
-    codes = {f.code for f in headers.analyze_all({})}
+    codes = {f.code for f in headers.analyze(_ex({}))}
     assert codes == {"csp-missing", "coop-missing", "corp-missing",
                      "pp-missing", "rp-missing", "hsts-missing", "xcto-missing", "xfo-missing"}
 
 
 def test_coep_is_reported_missing_once_coop_asks_for_isolation():
-    codes = {f.code for f in headers.analyze_all({"cross-origin-opener-policy": "same-origin"})}
+    codes = {f.code for f in headers.analyze(_ex({"cross-origin-opener-policy": "same-origin"}))}
     assert "coep-missing" in codes
 
 
 def test_hsts_is_not_reported_missing_on_a_plaintext_response():
-    codes = {f.code for f in headers.analyze_all({}, secure=False)}
+    codes = {f.code for f in headers.analyze(_ex({}, url="http://example.com/"))}
     assert "hsts-missing" not in codes
     assert "csp-missing" in codes
 
 
 def test_a_present_hsts_header_is_still_analyzed_on_a_plaintext_response():
-    codes = [f.code for f in headers.analyze_all({"strict-transport-security": "max-age=0"}, secure=False)]
+    codes = [f.code for f in headers.analyze(_ex({"strict-transport-security": "max-age=0"}, url="http://example.com/"))]
     assert "hsts-max-age-zero" in codes
 
 
 def test_a_finding_quotes_the_whole_value_it_was_sent():
     # the parameter is stripped to decide, not to report: the operator sent it
-    finding, = headers.analyze("Cross-Origin-Opener-Policy", 'unsafe-none; report-to="coop"')
+    finding, = response._analyze_header("Cross-Origin-Opener-Policy", 'unsafe-none; report-to="coop"')
     assert finding.data == {"value": 'unsafe-none; report-to="coop"'}
     assert 'unsafe-none; report-to="coop"' in headers.describe(finding)
 
 
 def test_missing_findings_are_ordered_the_same_on_every_run():
     # the tables are tuples, not sets, so output does not depend on hash seeding
-    once = [f.code for f in headers.analyze_all({})]
-    assert once == [f.code for f in headers.analyze_all({})]
+    once = [f.code for f in headers.analyze(_ex({}))]
+    assert once == [f.code for f in headers.analyze(_ex({}))]
     assert once[0] == "csp-missing"
 
 
 # ---------------------------------------------------------------------------
 # Header name casing
 # ---------------------------------------------------------------------------
-# Header names are case-insensitive, so analyze_all() takes them in any casing:
+# Header names are case-insensitive, so analyze() takes them in any casing:
 # a caller that has not lowercased its response must not be told that the
 # headers it sent are missing.
 
 
-def test_analyze_all_accepts_any_casing():
-    codes = [f.code for f in headers.analyze_all({
+def test_analyze_accepts_any_casing():
+    codes = [f.code for f in headers.analyze(_ex({
         "X-Frame-Options": "DENY",
         "Content-Security-Policy": SAFE_CSP + "; frame-ancestors 'none'",
         "REFERRER-POLICY": "no-referrer",
-    })]
+    }))]
     assert "xfo-missing" not in codes
     assert "csp-missing" not in codes
     assert "rp-missing" not in codes
@@ -506,20 +599,20 @@ def test_analyze_all_accepts_any_casing():
 
 
 def test_two_spellings_of_one_header_do_not_repeat_a_code():
-    codes = [f.code for f in headers.analyze_all({
+    codes = [f.code for f in headers.analyze(_ex({
         "X-Frame-Options": "ALLOWALL",
         "x-frame-options": "ALLOWALL",
-    })]
+    }))]
     assert codes.count("xfo-invalid") == 1
 
 
 def test_two_spellings_of_a_name_are_one_header_with_two_values():
     # Header names are case-insensitive, so this response repeated the header
     # rather than sending two. Both values are real and both are analyzed.
-    codes = [f.code for f in headers.analyze_all({
+    codes = [f.code for f in headers.analyze(_ex({
         "X-Frame-Options": "DENY",
         "x-frame-options": "ALLOWALL",
-    })]
+    }))]
     assert "xfo-invalid" in codes
     assert "xfo-missing" not in codes
     # ...and the defect is named once, however many times it occurs
@@ -571,7 +664,7 @@ RESPONSE = {
 
 
 def test_inventory_returns_canonical_names_and_values():
-    found = headers.inventory(RESPONSE)
+    found = headers.inventory(_ex(RESPONSE))
     assert found["information"] == {"Server": "nginx/1.18"}
     assert found["caching"] == {"Cache-Control": "no-store"}
     assert found["deprecated"] == {"X-XSS-Protection": "0"}
@@ -579,24 +672,24 @@ def test_inventory_returns_canonical_names_and_values():
 
 
 def test_stack_fingerprinting_headers_are_inventoried():
-    response = {
+    sample = {
         "x-generator": "Drupal 10 (https://www.drupal.org)",
         "x-runtime": "0.019382",
         "x-drupal-cache": "HIT",
         "$wsep": "",
         "x-powered-by": "PHP/8.2",
     }
-    found = headers.inventory(response)["information"]
+    found = headers.inventory(_ex(sample))["information"]
     assert set(found) == {"$WSEP", "X-Drupal-Cache", "X-Generator", "X-Powered-By", "X-Runtime"}
     # inventoried, never judged: only a human can say whether a value is a leak
-    assert headers.analyze("X-Generator", "Drupal 10") == []
+    assert response._analyze_header("X-Generator", "Drupal 10") == []
 
 
 def test_mesh_and_tracing_headers_are_inventoried_too():
     # The table is the union with OWASP's headers_remove.json, which reaches
     # past version banners into service-mesh plumbing: correlation identifiers
     # that map the internals, and per-hop latencies that time them.
-    response = {
+    sample = {
         "x-envoy-upstream-service-time": "12",
         "x-b3-traceid": "80f198ee56343ba8",
         "x-datadog-parent-id": "5678",
@@ -604,7 +697,7 @@ def test_mesh_and_tracing_headers_are_inventoried_too():
         "x-nextjs-matched-path": "/blog/[slug]",
         "x-dtagentid": "abc",
     }
-    found = headers.inventory(response)["information"]
+    found = headers.inventory(_ex(sample))["information"]
     assert set(found) == {
         "X-B3-TraceId",
         "X-Datadog-Parent-Id",
@@ -614,8 +707,8 @@ def test_mesh_and_tracing_headers_are_inventoried_too():
         "X-dtAgentId",
     }
     # still an inventory: a name on this table earns no finding by being there
-    assert headers.analyze_all(response, secure=True) == [
-        f for f in headers.analyze_all({}, secure=True)
+    assert headers.analyze(_ex(sample)) == [
+        f for f in headers.analyze(_ex({}))
     ]
 
 
@@ -634,7 +727,7 @@ def test_x_dns_prefetch_control_is_inventoried_as_one_to_drop():
     # It sits in the deprecated table without a -deprecated code: never
     # standardised is not the same as withdrawn, and the note says which.
     assert "X-DNS-Prefetch-Control" in headers.DEPRECATED_HEADERS
-    found = headers.inventory({"x-dns-prefetch-control": "off"})["deprecated"]
+    found = headers.inventory(_ex({"x-dns-prefetch-control": "off"}))["deprecated"]
     assert found == {"X-DNS-Prefetch-Control": "off"}
 
 
@@ -642,15 +735,13 @@ def test_integrity_policy_is_never_reported_missing():
     # Enforcing it means every script and stylesheet must carry integrity
     # metadata, which is a deployment commitment rather than a switch.
     assert "Integrity-Policy" not in headers.SECURITY_HEADERS
-    assert not [f for f in headers.analyze_all({}) if f.code.startswith("ip-")]
+    assert not [f for f in headers.analyze(_ex({})) if f.code.startswith("ip-")]
 
 
 def test_an_empty_charset_parameter_declares_nothing():
     # _charset() promises the charset or None, and "charset=" is neither a
     # declaration nor an absence until it is made one. _analyze_ct only asks
     # whether it is truthy, so nothing else would notice the difference.
-    from http_security_test import response
-
     assert response._charset("text/html; charset=") is None
     assert response._charset("text/html") is None
     assert response._charset('text/html; charset="utf-8"') == "utf-8"
@@ -658,26 +749,26 @@ def test_an_empty_charset_parameter_declares_nothing():
 
 
 def test_content_type_is_never_reported_missing():
-    # analyze_all sees no status line, and a 204 or 304 carries no
+    # analyze() sees no status line, and a 204 or 304 carries no
     # representation to describe, so absence decides nothing.
     assert "Content-Type" not in headers.SECURITY_HEADERS
-    assert not [f for f in headers.analyze_all({}) if f.code.startswith("ct-")]
+    assert not [f for f in headers.analyze(_ex({})) if f.code.startswith("ct-")]
 
 
 def test_clear_site_data_is_never_reported_missing():
     # It is what a logout endpoint sends, not something every response should
     # carry, so its absence is not a gap on any page.
     assert "Clear-Site-Data" not in headers.SECURITY_HEADERS
-    assert not [f for f in headers.analyze_all({}) if f.code.startswith("csd-")]
+    assert not [f for f in headers.analyze(_ex({})) if f.code.startswith("csd-")]
 
 
 def test_the_missing_inventory_is_a_fact_not_a_judgment():
     # HSTS is absent over plaintext and the inventory says so; the *finding* is
     # what secure=False suppresses. Deriving one from the other loses this.
-    absent = headers.inventory({})["missing"]
+    absent = headers.inventory(_ex({}))["missing"]
     assert "Strict-Transport-Security" in absent
     assert absent == list(headers.SECURITY_HEADERS)
-    reported = {f.code for f in headers.analyze_all({}, secure=False)}
+    reported = {f.code for f in headers.analyze(_ex({}, url="http://example.com/"))}
     assert "hsts-missing" not in reported
 
 
@@ -685,10 +776,10 @@ def test_inventories_never_judge_what_they_list():
     # These two tables exist precisely because no finding can be made from
     # them: only a human can say whether a given banner is a leak.
     noisy = {n.lower(): "x" for n in headers.INFORMATION_HEADERS + headers.CACHE_HEADERS}
-    assert {f.code for f in headers.analyze_all(noisy)} == {
-        f.code for f in headers.analyze_all({})
+    assert {f.code for f in headers.analyze(_ex(noisy))} == {
+        f.code for f in headers.analyze(_ex({}))
     }
-    assert len(headers.inventory(noisy)["information"]) == len(headers.INFORMATION_HEADERS)
+    assert len(headers.inventory(_ex(noisy))["information"]) == len(headers.INFORMATION_HEADERS)
 
 
 def test_the_header_tables_do_not_overlap():
@@ -746,7 +837,7 @@ ISOLATION_CASES = [
 
 def cross_origin_codes(present):
     return sorted(
-        f.code for f in headers.analyze_all(present) if f.code.startswith(("coep", "coop", "corp"))
+        f.code for f in headers.analyze(_ex(present)) if f.code.startswith(("coep", "coop", "corp"))
     )
 
 
@@ -812,7 +903,7 @@ def test_a_response_never_emits_the_same_code_twice():
         "x-permitted-cross-domain-policies": "all",
         "x-xss-protection": "1",
     }
-    codes = [f.code for f in headers.analyze_all(worst)]
+    codes = [f.code for f in headers.analyze(_ex(worst))]
     assert len(codes) == len(set(codes))
 
 
@@ -838,8 +929,11 @@ class FakePreloadList:
 
 
 def preload_codes(present, host, package):
+    # host=None used to disable the check without an argument to omit; the
+    # equivalent URL is one with no host for _host() to read back out.
+    url = "https://%s/" % host if host else "https://"
     with mock.patch.object(hsts, "hstspreload", package):
-        return [f.code for f in headers.analyze_all(present, host=host)]
+        return [f.code for f in headers.analyze(_ex(present, url=url))]
 
 
 def test_a_preload_claim_goes_unchecked_without_the_optional_package():
@@ -863,7 +957,7 @@ def test_a_domain_that_never_claimed_preload_is_not_reported():
 
 
 def test_membership_is_unchecked_when_the_caller_gives_no_host():
-    # analyze_all stays usable without one; it just cannot answer this
+    # analyze() stays usable without one; it just cannot answer this
     codes = preload_codes(PRELOAD_CLAIM, None, FakePreloadList())
     assert "hsts-not-preloaded" not in codes
 
@@ -887,7 +981,7 @@ def _every_finding_headers_can_emit():
 
 def _emitted():
     for name, value, _ in ANALYZER_CASES:
-        yield from headers.analyze(name, value)
+        yield from response._analyze_header(name, value)
     for present in (
         {},
         BOTH,
@@ -904,51 +998,51 @@ def _emitted():
         LEGACY_INVALID,
         {"x-frame-options": ["DENY", "SAMEORIGIN"]},
     ):
-        yield from headers.analyze_all(present)
+        yield from headers.analyze(_ex(present))
     # the -ineffective pair needs the response to have arrived over plaintext,
     # which no other case in this corpus does
     for present in (DEFINED_ENDPOINT, LEGACY_DEFINED):
-        yield from headers.analyze_all(present, secure=False, host="example.test")
+        yield from headers.analyze(_ex(present, url="http://example.test/"))
     for present, _ in ISOLATION_CASES:
-        yield from headers.analyze_all(present)
+        yield from headers.analyze(_ex(present))
     with mock.patch.object(hsts, "hstspreload", FakePreloadList()):
-        yield from headers.analyze_all(PRELOAD_CLAIM, host="example.com")
+        yield from headers.analyze(_ex(PRELOAD_CLAIM, url="https://example.com/"))
 
 
 def _every_code_headers_can_emit():
-    codes = {f.code for name, value, _ in ANALYZER_CASES for f in headers.analyze(name, value)}
-    codes |= {f.code for f in headers.analyze_all({})}
+    codes = {f.code for name, value, _ in ANALYZER_CASES for f in response._analyze_header(name, value)}
+    codes |= {f.code for f in headers.analyze(_ex({}))}
     # Some codes exist only in combinations -- coep-no-isolation is about the
     # COOP/COEP pair and no single header can produce it.
     codes |= {
         f.code
         for present, _ in ISOLATION_CASES
-        for f in headers.analyze_all(present)
+        for f in headers.analyze(_ex(present))
     }
     # ...and fp-conflicts and acao-credentials-wildcard each need a pair
-    codes |= {f.code for f in headers.analyze_all(BOTH)}
-    codes |= {f.code for f in headers.analyze_all(WILDCARD_WITH_CREDENTIALS)}
+    codes |= {f.code for f in headers.analyze(_ex(BOTH))}
+    codes |= {f.code for f in headers.analyze(_ex(WILDCARD_WITH_CREDENTIALS))}
     # ...as do the three wildcards that a credentialed response makes literal
-    codes |= {f.code for f in headers.analyze_all(CREDENTIALED_WILDCARDS)}
-    codes |= {f.code for f in headers.analyze_all(REPORT_ONLY_ONLY)}
+    codes |= {f.code for f in headers.analyze(_ex(CREDENTIALED_WILDCARDS))}
+    codes |= {f.code for f in headers.analyze(_ex(REPORT_ONLY_ONLY))}
     # ...and ip-endpoints-undefined needs a policy naming a group beside a
     # Reporting-Endpoints header that does not define it
-    codes |= {f.code for f in headers.analyze_all(REPORTS_NOWHERE)}
+    codes |= {f.code for f in headers.analyze(_ex(REPORTS_NOWHERE))}
     # ...and the three other headers that name a reporting group the same way
     for present in (CSP_REPORTS_NOWHERE, COOP_REPORTS_NOWHERE, COEP_REPORTS_NOWHERE,
                     UNDELIVERABLE_ENDPOINT, INVALID_ENDPOINTS, LEGACY_UNDELIVERABLE,
                     LEGACY_INVALID):
-        codes |= {f.code for f in headers.analyze_all(present)}
+        codes |= {f.code for f in headers.analyze(_ex(present))}
     # ...and the -ineffective pair, which only exists on a plaintext response
     for present in (DEFINED_ENDPOINT, LEGACY_DEFINED):
         codes |= {
-            f.code for f in headers.analyze_all(present, secure=False, host="example.test")
+            f.code for f in headers.analyze(_ex(present, url="http://example.test/"))
         }
-    codes |= {f.code for f in headers.analyze_all({"x-frame-options": ["DENY", "SAMEORIGIN"]})}
+    codes |= {f.code for f in headers.analyze(_ex({"x-frame-options": ["DENY", "SAMEORIGIN"]}))}
     # hsts-not-preloaded needs the optional preload list to be emittable at all
     with mock.patch.object(hsts, "hstspreload", FakePreloadList()):
         codes |= {
-            f.code for f in headers.analyze_all(PRELOAD_CLAIM, host="example.com")
+            f.code for f in headers.analyze(_ex(PRELOAD_CLAIM, url="https://example.com/"))
         }
     return codes
 
@@ -973,14 +1067,14 @@ def test_no_severity_is_mapped_for_a_code_that_cannot_be_emitted():
 def test_report_is_json_serialisable_with_no_encoder():
     import json
 
-    encoded = json.dumps(headers.report(RESPONSE))
-    assert json.loads(encoded) == headers.report(RESPONSE)
+    encoded = json.dumps(headers.report(_ex(RESPONSE)))
+    assert json.loads(encoded) == headers.report(_ex(RESPONSE))
 
 
 def test_the_two_sides_are_nested_so_a_header_name_is_never_ambiguous():
     # Cache-Control is both a request and a response header, so once requests
     # are analysed a bare "header" field could not say which one it meant.
-    out = headers.report(RESPONSE)
+    out = headers.report(_ex(RESPONSE))
     assert set(out) == {"response"}
     assert set(out["response"]) == {"findings", "inventory", "references"}
 
@@ -988,7 +1082,7 @@ def test_the_two_sides_are_nested_so_a_header_name_is_never_ambiguous():
 def test_a_finding_row_carries_its_level_and_data():
     row, = [
         r
-        for r in headers.report({"x-frame-options": "ALLOWALL"})["response"]["findings"]
+        for r in headers.report(_ex({"x-frame-options": "ALLOWALL"}))["response"]["findings"]
         if r["code"] == "xfo-invalid"
     ]
     assert row == {
@@ -1005,13 +1099,13 @@ def test_a_finding_row_carries_its_level_and_data():
 
 def test_data_is_always_present_even_when_empty():
     # so a consumer never has to test for the key
-    rows = headers.report({})["response"]["findings"]
+    rows = headers.report(_ex({}))["response"]["findings"]
     assert all("data" in row for row in rows)
     assert all(row["data"] == {} for row in rows if row["code"].endswith("-missing"))
 
 
 def test_the_message_can_be_left_out_entirely():
-    rows = headers.report(RESPONSE, message=False)["response"]["findings"]
+    rows = headers.report(_ex(RESPONSE), message=False)["response"]["findings"]
     assert rows
     assert all("message" not in row for row in rows)
     assert all(row["data"] is not None for row in rows)
@@ -1020,20 +1114,20 @@ def test_the_message_can_be_left_out_entirely():
 def test_findings_come_out_worst_first():
     levels = [
         r["level"]
-        for r in headers.report({"x-frame-options": "ALLOWALL"})["response"]["findings"]
+        for r in headers.report(_ex({"x-frame-options": "ALLOWALL"}))["response"]["findings"]
     ]
     assert levels == sorted(levels, key=headers.SEVERITIES.index)
 
 
 def test_one_code_may_appear_twice_in_a_report():
     # the shape the old severity-keyed schema could not express
-    rows = headers.report({"x-frame-options": ["ALLOWALL", "NONSENSE"]})["response"]["findings"]
+    rows = headers.report(_ex({"x-frame-options": ["ALLOWALL", "NONSENSE"]}))["response"]["findings"]
     invalid = [r for r in rows if r["code"] == "xfo-invalid"]
     assert [r["data"]["value"] for r in invalid] == ["ALLOWALL", "NONSENSE"]
 
 
 def test_the_report_carries_every_inventory():
-    assert set(headers.report(RESPONSE)["response"]["inventory"]) == {
+    assert set(headers.report(_ex(RESPONSE))["response"]["inventory"]) == {
         "security",
         "missing",
         "deprecated",
@@ -1044,7 +1138,7 @@ def test_the_report_carries_every_inventory():
 
 def test_a_finding_carries_its_consequences():
     present = headers.parse_headers([("Content-Security-Policy", "script-src 'unsafe-inline'")])
-    doc = headers.report(present)
+    doc = headers.report(_ex(present))
     row = next(f for f in doc["response"]["findings"] if f["code"] == "csp-unsafe-inline")
     assert row["consequences"] == ["xss"]
 
@@ -1053,14 +1147,14 @@ def test_consequences_are_always_present_even_when_empty():
     # The `data` rule: content this package derived is always there, so a
     # consumer never has to test for the key.
     present = headers.parse_headers([("Report-To", "not json")])
-    doc = headers.report(present)
+    doc = headers.report(_ex(present))
     row = next(f for f in doc["response"]["findings"] if f["code"] == "rt-invalid")
     assert row["consequences"] == []
 
 
 def test_the_references_block_collects_headers_and_taxonomy():
     present = headers.parse_headers([("X-Frame-Options", "ALLOWALL")])
-    block = headers.report(present)["response"]["references"]
+    block = headers.report(_ex(present))["response"]["references"]
     assert "X-Frame-Options" in block["headers"]
     assert "CWE-1021" in block["taxonomy"]
     assert "CAPEC-222" in block["taxonomy"]
@@ -1068,7 +1162,7 @@ def test_the_references_block_collects_headers_and_taxonomy():
 
 def test_the_references_block_is_deduped_and_sorted_numerically():
     present = headers.parse_headers([("X-Frame-Options", "ALLOWALL")])
-    block = headers.report(present)["response"]["references"]
+    block = headers.report(_ex(present))["response"]["references"]
     assert block["headers"] == sorted(set(block["headers"]))
     # CWE-1021 after CWE-79: by scheme then numeric id, not lexically.
     cwes = [i for i in block["taxonomy"] if i.startswith("CWE-")]
@@ -1108,7 +1202,7 @@ def test_references_is_fed_by_findings_only():
     other test in this file and fails this one.
     """
     present = headers.parse_headers([("X-Frame-Options", "ALLOWALL")])
-    document = headers.report(present)
+    document = headers.report(_ex(present))
     block = document["response"]["references"]
     inventory_missing = document["response"]["inventory"]["missing"]
     assert "Cross-Origin-Embedder-Policy" in inventory_missing
@@ -1130,7 +1224,7 @@ RAW_REQUEST = b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n"
 
 
 def test_a_report_without_blobs_has_neither_key():
-    out = headers.report(RESPONSE)
+    out = headers.report(_ex(RESPONSE))
     assert "raw" not in out["response"]
     assert "request" not in out
 
@@ -1138,17 +1232,17 @@ def test_a_report_without_blobs_has_neither_key():
 def test_the_response_blob_round_trips_to_the_same_bytes():
     import base64
 
-    out = headers.report(headers.parse_raw_headers(RAW_RESPONSE), raw=RAW_RESPONSE)
+    out = headers.report(_ex(headers.parse_raw_headers(RAW_RESPONSE), raw=RAW_RESPONSE))
     assert base64.b64decode(out["response"]["raw"]) == RAW_RESPONSE
 
 
 def test_the_blob_stays_analysable_so_a_report_is_reproducible():
     import base64
 
-    out = headers.report(headers.parse_raw_headers(RAW_RESPONSE), raw=RAW_RESPONSE)
+    out = headers.report(_ex(headers.parse_raw_headers(RAW_RESPONSE), raw=RAW_RESPONSE))
     again = headers.parse_raw_headers(base64.b64decode(out["response"]["raw"]))
     assert [r["code"] for r in out["response"]["findings"]] == [
-        f.code for f in headers.order_findings(headers.analyze_all(again))
+        f.code for f in headers.order_findings(headers.analyze(_ex(again)))
     ]
 
 
@@ -1158,12 +1252,12 @@ def test_text_is_encoded_the_way_parse_raw_headers_decodes_it():
     import base64
 
     as_text = RAW_RESPONSE.decode("latin-1")
-    out = headers.report({}, raw=as_text)
+    out = headers.report(_ex({}, raw=as_text))
     assert base64.b64decode(out["response"]["raw"]) == RAW_RESPONSE
 
 
 def test_a_request_blob_gets_its_own_key():
-    out = headers.report(RESPONSE, request_raw=RAW_REQUEST)
+    out = headers.report(_ex(RESPONSE, request_raw=RAW_REQUEST))
     assert set(out) == {"response", "request"}
     assert set(out["request"]) == {"raw"}
     assert "findings" not in out["request"]
@@ -1172,7 +1266,7 @@ def test_a_request_blob_gets_its_own_key():
 def test_a_report_with_blobs_is_still_json_serialisable():
     import json
 
-    out = headers.report(RESPONSE, raw=RAW_RESPONSE, request_raw=RAW_REQUEST)
+    out = headers.report(_ex(RESPONSE, raw=RAW_RESPONSE, request_raw=RAW_REQUEST))
     assert json.loads(json.dumps(out)) == out
 
 
@@ -1276,7 +1370,7 @@ def test_no_analyser_builds_a_sentence():
 
 
 def test_data_is_the_machine_readable_half():
-    finding, = headers.analyze("X-Frame-Options", "ALLOWALL")
+    finding, = response._analyze_header("X-Frame-Options", "ALLOWALL")
     assert finding.data == {"value": "ALLOWALL"}
     # ...and the sentence is built from exactly that, not from a second copy
     assert headers.describe(finding) == headers.MESSAGES["xfo-invalid"].format(
@@ -1484,7 +1578,7 @@ BOTH = dict(STANDALONE, **{"permissions-policy": "geolocation=()"})
 
 
 def fp_codes(present):
-    return sorted(f.code for f in headers.analyze_all(present) if f.code.startswith("fp-"))
+    return sorted(f.code for f in headers.analyze(_ex(present)) if f.code.startswith("fp-"))
 
 
 def test_a_standalone_feature_policy_is_judged_on_its_contents():
@@ -1526,7 +1620,7 @@ WILDCARD_WITH_CREDENTIALS = {
 
 
 def acao_codes(present):
-    return sorted(f.code for f in headers.analyze_all(present) if f.code.startswith("acao-"))
+    return sorted(f.code for f in headers.analyze(_ex(present)) if f.code.startswith("acao-"))
 
 
 def test_a_wildcard_with_credentials_is_the_pairing_browsers_refuse():
@@ -1607,7 +1701,7 @@ CREDENTIALED_WILDCARDS = CREDENTIALED | {
 def cors_codes(present):
     return sorted(
         f.code
-        for f in headers.analyze_all(present)
+        for f in headers.analyze(_ex(present))
         if f.code[:4] in ("acao", "acac", "acam", "acah", "aceh", "acma")
     )
 
@@ -1681,7 +1775,7 @@ REPORT_ONLY_ONLY = {
 
 
 def unenforced_codes(present):
-    return sorted(f.code for f in headers.analyze_all(present) if f.code.endswith("-ro-unenforced"))
+    return sorted(f.code for f in headers.analyze(_ex(present)) if f.code.endswith("-ro-unenforced"))
 
 
 def test_a_policy_only_in_report_only_mode_is_reported():
@@ -1715,7 +1809,7 @@ REPORTS_NOWHERE = {"integrity-policy": "blocked-destinations=(script), endpoints
 
 
 def ip_codes(present):
-    return sorted(f.code for f in headers.analyze_all(present) if f.code.startswith("ip-"))
+    return sorted(f.code for f in headers.analyze(_ex(present)) if f.code.startswith("ip-"))
 
 
 def test_a_reporting_group_nothing_defines_is_reported():
@@ -1768,7 +1862,7 @@ def test_the_report_only_spelling_is_left_alone():
 
 def test_the_content_of_a_report_only_header_is_not_judged():
     # it blocks nothing, so what it permits decides nothing
-    assert headers.analyze("Content-Security-Policy-Report-Only", "script-src 'unsafe-inline'") == []
+    assert response._analyze_header("Content-Security-Policy-Report-Only", "script-src 'unsafe-inline'") == []
 
 
 # ---------------------------------------------------------------------------
@@ -1793,7 +1887,7 @@ LEGACY_INVALID = {"report-to": "not json at all"}
 
 def group_codes(present):
     return sorted(
-        f.code for f in headers.analyze_all(present) if f.code.endswith("-report-to-undefined")
+        f.code for f in headers.analyze(_ex(present)) if f.code.endswith("-report-to-undefined")
     )
 
 
@@ -1850,7 +1944,7 @@ def test_the_data_carries_every_undefined_group():
         "content-security-policy": "default-src 'none'; report-to a b",
         "reporting-endpoints": 'b="https://example.test/r"',
     }
-    finding = next(f for f in headers.analyze_all(present) if f.code == "csp-report-to-undefined")
+    finding = next(f for f in headers.analyze(_ex(present)) if f.code == "csp-report-to-undefined")
     assert finding.data == {"groups": ["a"]}
 
 
@@ -1871,12 +1965,12 @@ def test_report_only_spellings_are_left_alone():
 # headers stay quiet -- and Reporting-Endpoints answers for the URL.
 
 
-def endpoint_codes(present, **kwargs):
+def endpoint_codes(present, secure=True, host=None):
     # both spellings of the defining header, so a code cannot hide behind the
     # prefix the helper happens to look for
     return sorted(
         f.code
-        for f in headers.analyze_all(present, **kwargs)
+        for f in headers.analyze(_ex(present, url=_url(secure, host)))
         if f.code.startswith(("re-", "rt-"))
     )
 
@@ -1890,7 +1984,7 @@ def test_an_endpoint_the_browser_discards_is_the_defining_headers_defect():
 
 def test_the_undeliverable_endpoint_is_named():
     present = {"reporting-endpoints": 'a="http://example.test/r", b="https://example.test/r"'}
-    finding, = [f for f in headers.analyze_all(present) if f.code == "re-endpoint-undeliverable"]
+    finding, = [f for f in headers.analyze(_ex(present)) if f.code == "re-endpoint-undeliverable"]
     assert finding.data == {"endpoints": ["a"]}
 
 
@@ -1932,6 +2026,42 @@ def test_reporting_over_plaintext_loopback_is_left_alone():
 def test_a_secure_response_is_not_told_its_reporting_is_ineffective():
     present = {"reporting-endpoints": 'csp-ep="https://example.test/r"'}
     assert endpoint_codes(present, secure=True, host="example.test") == []
+
+
+# -- an unparseable URL is UNKNOWN, not plaintext ------------------------------
+# secure used to be two-valued: "" from a URL that would not parse read as
+# known plaintext, and a correctly configured HTTPS response whose URL merely
+# failed to parse was told its reporting was void -- a false positive on a
+# correct configuration, from an input nobody supplied. The two headers below
+# reuse the exact values DEFINED_ENDPOINT and LEGACY_DEFINED already exercise
+# individually, combined so one test can pin both re- and rt-ineffective.
+
+REPORTING_HEADERS_FIXTURE = {
+    "reporting-endpoints": 'csp-ep="https://example.test/r"',
+    "report-to": '{"group":"g","endpoints":[{"url":"https://example.test/r"}]}',
+}
+
+
+def test_an_unparseable_url_does_not_call_reporting_ineffective():
+    codes = {f.code for f in headers.analyze(_ex(REPORTING_HEADERS_FIXTURE, url="::::"))}
+    assert "re-ineffective" not in codes
+    assert "rt-ineffective" not in codes
+
+
+def test_an_unparseable_url_does_not_demand_hsts():
+    codes = {f.code for f in headers.analyze(_ex({}, url="::::"))}
+    assert "hsts-missing" not in codes
+
+
+def test_a_plaintext_url_still_calls_reporting_ineffective():
+    # The abstention above must apply to UNKNOWN only. Over http a browser
+    # really does not read these, and that finding has to survive the fix.
+    codes = {
+        f.code
+        for f in headers.analyze(_ex(REPORTING_HEADERS_FIXTURE, url="http://example.com/"))
+    }
+    assert "re-ineffective" in codes
+    assert "rt-ineffective" in codes
 
 
 # -- Report-To, the predecessor, still defines groups -------------------------
@@ -2042,22 +2172,22 @@ def test_report_to_is_ineffective_on_a_plaintext_response():
 
 
 def test_report_to_is_inventoried_but_never_reported_missing():
-    inventory = headers.inventory({"report-to": '{"group":"g","endpoints":[]}'})
+    inventory = headers.inventory(_ex({"report-to": '{"group":"g","endpoints":[]}'}))
     assert "Report-To" in inventory["security"]
-    assert "Report-To" not in headers.inventory({})["missing"]
+    assert "Report-To" not in headers.inventory(_ex({}))["missing"]
 
 
 def test_reporting_endpoints_is_inventoried_when_present():
-    inventory = headers.inventory({"reporting-endpoints": 'csp-ep="https://example.test/r"'})
+    inventory = headers.inventory(_ex({"reporting-endpoints": 'csp-ep="https://example.test/r"'}))
     assert "Reporting-Endpoints" in inventory["security"]
 
 
 def test_reporting_endpoints_is_never_reported_missing():
     # a response that configures no reporting is the ordinary state of the web,
     # so its absence is not a gap and must reach neither list nor finding
-    inventory = headers.inventory({})
+    inventory = headers.inventory(_ex({}))
     assert "Reporting-Endpoints" not in inventory["missing"]
-    assert not [f for f in headers.analyze_all({}) if f.header == "Reporting-Endpoints"]
+    assert not [f for f in headers.analyze(_ex({})) if f.header == "Reporting-Endpoints"]
 
 
 # ---------------------------------------------------------------------------
@@ -2081,7 +2211,7 @@ PRESENT_ONLY_RESPONSE = {
 
 
 def test_headers_analysed_but_never_demanded_are_inventoried():
-    inventory = headers.inventory(PRESENT_ONLY_RESPONSE)
+    inventory = headers.inventory(_ex(PRESENT_ONLY_RESPONSE))
     assert inventory["security"] == {
         "Clear-Site-Data": '"cookies"',
         "Integrity-Policy": "blocked-destinations=(script)",
@@ -2100,14 +2230,14 @@ def test_none_of_them_is_ever_reported_missing():
     mint an `ip-missing` firing on very nearly every site on the web, which is
     principle 4 -- so it is inventoried and not demanded.
     """
-    missing = headers.inventory({})["missing"]
+    missing = headers.inventory(_ex({}))["missing"]
     for name in ("Clear-Site-Data", "Integrity-Policy"):
         assert name not in missing
     assert not [name for name in missing if name.endswith("-Report-Only")]
 
 
 def test_a_response_omitting_them_raises_no_finding_about_them():
-    codes = {f.code for f in headers.analyze_all({})}
+    codes = {f.code for f in headers.analyze(_ex({}))}
     assert not [c for c in codes if c in ("csd-missing", "ip-missing")]
     assert not [c for c in codes if c.endswith("-ro-unenforced")]
 
@@ -2118,7 +2248,7 @@ def test_a_valid_integrity_policy_leaves_a_trace_in_the_report():
     A reader could not tell this response from one that never sent the header.
     That is principle 2 -- inventories are facts -- failing by omission.
     """
-    document = headers.report({"integrity-policy": "blocked-destinations=(script)"})
+    document = headers.report(_ex({"integrity-policy": "blocked-destinations=(script)"}))
     assert not [
         f for f in document["response"]["findings"] if f["header"] == "Integrity-Policy"
     ]
@@ -2137,7 +2267,7 @@ def test_content_type_is_deliberately_in_no_inventory():
     `content-type` is not among them. A sixth inventory key was designed and
     deferred until a second such header exists; CLAUDE.md carries the trigger.
     """
-    inventory = headers.inventory({"content-type": "text/html"})
+    inventory = headers.inventory(_ex({"content-type": "text/html"}))
     assert not [table for table in inventory.values() if "Content-Type" in table]
 
 
@@ -2160,7 +2290,7 @@ CORS_RESPONSE = {
 
 
 def test_the_cors_family_is_inventoried_when_present():
-    inventory = headers.inventory(CORS_RESPONSE)
+    inventory = headers.inventory(_ex(CORS_RESPONSE))
     assert inventory["security"] == {
         "Access-Control-Allow-Origin": "https://a.test",
         "Access-Control-Allow-Credentials": "true",
@@ -2172,20 +2302,20 @@ def test_the_cors_family_is_inventoried_when_present():
 
 
 def test_no_cors_header_is_ever_reported_missing():
-    missing = headers.inventory({})["missing"]
+    missing = headers.inventory(_ex({}))["missing"]
     assert not [name for name in missing if name.startswith("Access-Control-")]
 
 
 def test_a_response_sharing_nothing_raises_no_cors_finding():
     assert not [
-        f for f in headers.analyze_all({}) if f.header.startswith("Access-Control-")
+        f for f in headers.analyze(_ex({})) if f.header.startswith("Access-Control-")
     ]
 
 
 def test_the_cors_inventory_does_not_judge_what_it_lists():
     # principle 2: the inventory reports the value, the finding judges it, and
     # a wildcard shared with credentials is still inventoried verbatim
-    inventory = headers.inventory(WILDCARD_WITH_CREDENTIALS)
+    inventory = headers.inventory(_ex(WILDCARD_WITH_CREDENTIALS))
     assert inventory["security"]["Access-Control-Allow-Origin"] == "*"
 
 
@@ -2229,7 +2359,7 @@ def test_any_policy_reporting_nowhere_counts():
         ],
         "reporting-endpoints": 'good="https://example.test/r"',
     }
-    finding = next(f for f in headers.analyze_all(present) if f.code == "csp-report-to-undefined")
+    finding = next(f for f in headers.analyze(_ex(present)) if f.code == "csp-report-to-undefined")
     assert finding.data == {"groups": ["bad"]}
 
 
@@ -2265,7 +2395,7 @@ AIRTIGHT = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'"
 def csp_codes(*policies):
     return sorted(
         f.code
-        for f in headers.analyze_all({"content-security-policy": list(policies)})
+        for f in headers.analyze(_ex({"content-security-policy": list(policies)}))
         if f.code.startswith("csp-")
     )
 
@@ -2306,14 +2436,14 @@ def test_a_repeated_header_names_each_distinct_defect():
     # one -- and would collapse two cookies missing Secure into one as well.
     findings = [
         f
-        for f in headers.analyze_all({"x-frame-options": ["ALLOWALL", "NONSENSE"]})
+        for f in headers.analyze(_ex({"x-frame-options": ["ALLOWALL", "NONSENSE"]}))
         if f.code == "xfo-invalid"
     ]
     assert [f.data["value"] for f in findings] == ["ALLOWALL", "NONSENSE"]
 
 
 def test_a_repeated_header_still_names_an_identical_defect_once():
-    codes = [f.code for f in headers.analyze_all({"x-frame-options": ["ALLOWALL", "ALLOWALL"]})]
+    codes = [f.code for f in headers.analyze(_ex({"x-frame-options": ["ALLOWALL", "ALLOWALL"]}))]
     assert codes.count("xfo-invalid") == 1
 
 
@@ -2349,10 +2479,20 @@ def test_parse_raw_headers_accepts_a_block_with_no_status_line():
     assert headers.parse_raw_headers("Server: nginx\r\n\r\n") == {"server": ["nginx"]}
 
 
-def test_analyze_all_still_takes_a_plain_string_per_header():
-    # the ordinary caller has one value per header and should not have to wrap it
-    codes = [f.code for f in headers.analyze_all({"x-content-type-options": "sniff"})]
-    assert "xcto-invalid" in codes
+def test_normalize_still_takes_a_plain_string_per_header():
+    # The property this test used to guard through analyze_all() is really
+    # _normalize()'s own contract, not analyze()'s: mapping() (what analyze()
+    # and inventory() build their `present` from) takes (name, value) PAIRS,
+    # so there is no plain-string-vs-list choice left at that layer -- every
+    # path into _normalize() via _filter_headers now arrives pre-listed by
+    # mapping(), which would let this branch go untested if the old test were
+    # simply migrated onto _ex() (a caller with one string value per header
+    # should not have to wrap it, and _ex() would silently do that wrapping
+    # for it, testing the test helper rather than the package). So this tests
+    # _normalize() directly instead of retiring the property outright.
+    assert message._normalize({"X-Content-Type-Options": "sniff"}) == {
+        "x-content-type-options": ["sniff"]
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2365,7 +2505,7 @@ def test_analyze_all_still_takes_a_plain_string_per_header():
 
 def duplicate_findings(present):
     return sorted(
-        f.header for f in headers.analyze_all(present) if f.code == "duplicate-headers"
+        f.header for f in headers.analyze(_ex(present)) if f.code == "duplicate-headers"
     )
 
 
@@ -2400,7 +2540,7 @@ def test_each_illegally_repeated_header_gets_its_own_finding():
 
 def framing_verdict(present):
     return sorted(
-        f.code for f in headers.analyze_all(present)
+        f.code for f in headers.analyze(_ex(present))
         if "frame" in f.code or f.code.startswith("xfo")
     )
 

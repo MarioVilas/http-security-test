@@ -62,22 +62,27 @@ def _hop(hop):
     return row
 
 
-def analysed(item, report):
+def analysed(facts, report):
     """One analysed exchange as a result object.
+
+    `facts` is the run's own record of the fetch -- `cli/outcome.py`'s `Run`,
+    or anything else carrying the same `kind`, `target`, `url`, `status`,
+    `reason` and `hops` names. `report` is the library's document, unmutated;
+    the two are kept apart on purpose, per the module docstring.
 
     The full redirect chain is repeated on every result derived from a target
     rather than stored once. NDJSON is a reserved output format, and an NDJSON
     line that needs a sibling line to be understood is a broken format.
     """
-    source = {"kind": item.kind, "url": item.url}
-    if item.status is not None:
-        source["status"] = item.status
-    if item.reason:
-        source["reason"] = item.reason
-    source["hops"] = [_hop(hop) for hop in item.hops]
+    source = {"kind": facts.kind, "url": facts.url}
+    if facts.status is not None:
+        source["status"] = facts.status
+    if facts.reason:
+        source["reason"] = facts.reason
+    source["hops"] = [_hop(hop) for hop in facts.hops]
     return {
         "outcome": "ok",
-        "target": item.target,
+        "target": facts.target,
         "source": source,
         "report": report,
     }

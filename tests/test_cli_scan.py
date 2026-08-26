@@ -16,24 +16,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import email.message
 import io
 import json
 import sys
 
-from http_security_test import parse_headers
-from http_security_test.cli import commands, exchange, options
+from http_security_test.cli import commands, options, outcome
+from http_security_test.exchange import Exchange, host
+from http_security_test.message import Request, Response
 
 
 def parse(argv):
     return options.build_parser().parse_args(argv)
-
-
-def headers(pairs):
-    message = email.message.Message()
-    for name, value in pairs:
-        message.add_header(name, value)
-    return parse_headers(message.items())
 
 
 # Fixtures verified 2026-08-21 against the analyser at 357 tests passing.
@@ -58,26 +51,35 @@ def ok(target, url=None, status=200, pairs=None, hops=()):
     # Every caller passes a full URL as `target` (do_scan's own _targets()
     # always produces one), so the old `"https://%s/" % target` fallback
     # built "https://https://a.test//" and exchange.host() of THAT returns
-    # "https" -- not the intended hostname. host= is one of exactly two facts
-    # only the source can supply, and it drives the HSTS preload lookup, so a
-    # malformed default silently untested that path in every fixture that
-    # relies on it.
-    return exchange.Exchange(
-        kind="live",
-        target=target,
-        url=url or (target if "://" in target else "https://%s/" % target),
-        status=status,
-        reason="OK",
-        headers=headers(HARDENED if pairs is None else pairs),
-        hops=hops,
+    # "https" -- not the intended hostname. The URL is the one fact only the
+    # source can supply and analyze() derives both host and scheme from it
+    # (via exchange.request.url), driving the HSTS preload lookup among other
+    # things -- so a malformed default silently untested that path in every
+    # fixture that relies on it.
+    #
+    # A (facts, exchange) pair, matching what live.fetch() now yields:
+    # `facts` is the run's own record (cli/outcome.py's Run), `exchange` is
+    # the analyser's own Request/Response pair. Built with from_parts, so
+    # both carry no raw bytes and no fidelity -- ordinary, uncaptured fixtures.
+    real_url = url or (target if "://" in target else "https://%s/" % target)
+    facts = outcome.Run(
+        kind="live", target=target, url=real_url, status=status, reason="OK", hops=hops,
     )
+    ex = Exchange(
+        Request.from_parts(url=real_url),
+        Response.from_parts(
+            status=status, reason="OK", headers=list(HARDENED if pairs is None else pairs)
+        ),
+    )
+    return facts, ex
 
 
 def source_of(*items):
     """A fake input source: hands back whatever it was built with, per target."""
     by_target = {}
     for item in items:
-        by_target.setdefault(item.target, []).append(item)
+        facts, _exchange = item
+        by_target.setdefault(facts.target, []).append(item)
 
     def source(target, _options):
         return tuple(by_target.get(target, ()))
@@ -123,7 +125,7 @@ def test_fail_on_error_exits_zero_when_only_warnings_are_present(capsys):
 
 def test_a_failed_target_exits_three(capsys):
     def source(target, _options):
-        return (exchange.Failure(target, "dns", "no such host"),)
+        return ((outcome.Failure(target, "dns", "no such host"), None),)
 
     code = commands.do_scan(parse(["scan", "https://nope.test/"]), source=source)
     assert code == 3
@@ -138,7 +140,7 @@ def test_an_operational_failure_beats_a_finding(capsys):
     def source(target, _options):
         if target == "https://a.test/":
             return (bad,)
-        return (exchange.Failure(target, "timeout", "timed out"),)
+        return ((outcome.Failure(target, "timeout", "timed out"), None),)
 
     code = commands.do_scan(
         parse(["scan", "--fail-on", "error", "https://a.test/", "https://b.test/"]),
@@ -365,22 +367,24 @@ def test_the_ok_fixture_builds_a_well_formed_url_not_a_doubled_scheme(capsys):
 
 
 def test_host_reaches_report_as_the_true_hostname(monkeypatch, capsys):
-    # host= is one of exactly two facts only the source can supply, and it
-    # drives the HSTS preload lookup -- so this pins that do_scan derives it
-    # from the response's own URL correctly, rather than from a malformed one.
+    # The URL is one of exactly the facts only the source can supply, and
+    # report() derives host (and scheme, for the HSTS preload lookup) from
+    # exchange.request.url -- so this pins that do_scan forwards the source's
+    # exchange to report() untouched, rather than rebuilding one from a
+    # malformed URL.
     captured = {}
     real_report = commands.report
 
-    def spy(headers, **kwargs):
-        captured.update(kwargs)
-        return real_report(headers, **kwargs)
+    def spy(exchange, **kwargs):
+        captured["url"] = exchange.request.url
+        return real_report(exchange, **kwargs)
 
     monkeypatch.setattr(commands, "report", spy)
     commands.do_scan(
         parse(["scan", "https://a.test/"]), source=source_of(ok("https://a.test/"))
     )
     capsys.readouterr()
-    assert captured["host"] == "a.test"
+    assert host(captured["url"]) == "a.test"
 
 
 def test_the_scope_in_force_reaches_the_fetcher(capsys):

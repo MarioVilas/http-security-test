@@ -28,6 +28,8 @@ import json
 import re
 
 from .csp import _analyze_csp, _analyze_csp_all, parse_csp
+from .exchange import host as _host
+from .exchange import scheme as _scheme
 from .findings import Finding, identity
 from .hsts import _analyze_hsts, _analyze_preload
 from .isolation import (
@@ -63,9 +65,9 @@ from .message import (
     _filter_headers,
     _lookup,
     _lookup_all,
-    _normalize,
     _sole_value,
 )
+from .message import mapping as _mapping
 from .policies import _analyze_fp, _analyze_policy_overlap, _analyze_pp
 
 # 180 days, the floor recommended for a policy that is meant to stick.
@@ -469,8 +471,10 @@ def _analyze_ct(value):
 
     Only text/html is asked. Everywhere else the parameter is either defined
     away (application/json is UTF-8 by definition) or decides nothing, and
-    absence of the header is not reported at all: analyze_all sees no status
-    line, and a 204 or 304 carries no representation to describe.
+    absence of the header is still not reported -- no longer because the status
+    is invisible (`analyze()` reads `exchange.response.status` now), but because
+    a 204 or 304 still carries no representation to describe. A choice, not a
+    limitation.
     """
     if _media_type(value) not in CT_CHARSET_TYPES or _charset(value):
         return []
@@ -591,7 +595,7 @@ _ANALYZERS = {
 }
 
 
-def analyze(name, value):
+def _analyze_header(name, value):
     """Findings for one header in isolation.
 
     Unknown header names and None values yield no findings.
@@ -610,17 +614,44 @@ def _missing_tag(name):
     return "".join(x for x in name if x.isupper()).lower() + "-missing"
 
 
-def _report_missing(present, secure=True):
+# Headers that protect a representation. A 3xx carries none, so demanding them
+# there is a false positive once per hop -- measured at six on a bare 301.
+# HSTS is deliberately absent: on the https legs of a chain a redirect is
+# exactly where it matters.
+REPRESENTATION_HEADERS = (
+    "Content-Security-Policy",
+    "Cross-Origin-Opener-Policy",
+    "Cross-Origin-Resource-Policy",
+    "Referrer-Policy",
+    "X-Content-Type-Options",
+    "X-Frame-Options",
+)
+
+
+def _carries_a_representation(status):
+    """Whether a response of this status has content for a header to protect.
+
+    None means unknown, and unknown is not evidence of absence: every check
+    stays on. Only a status we can read and that says 3xx suppresses.
+    """
+    return not (status is not None and 300 <= status < 400)
+
+
+def _report_missing(present, secure=True, status=None):
     """Reports missing security headers as findings.
 
     Over a plaintext connection browsers ignore HSTS entirely, so its absence
-    there is not a defect and is not reported.
+    there is not a defect and is not reported. A 3xx status carries no
+    representation, so the headers that protect one are not reported missing
+    there either -- HSTS is exempt from that second rule, not the first.
     """
     findings = []
     for name in SECURITY_HEADERS:
         if name.lower() in present:
             continue
         if not secure and name == "Strict-Transport-Security":
+            continue
+        if not _carries_a_representation(status) and name in REPRESENTATION_HEADERS:
             continue
         findings.append(Finding(name, _missing_tag(name)))
     return findings
@@ -863,7 +894,15 @@ def _reporting_endpoints_apply(secure, host):
     'modern', and the origin of response's url is not potentially trustworthy."
     Note the conjunction -- a plaintext response from a loopback origin is
     still potentially trustworthy, so the header applies there.
+
+    `secure` is `None` when the scheme could not be read from the URL at all --
+    a missing input, not a plaintext answer. Whether a browser reads this
+    header cannot be decided without it, and "ineffective" is a claim, so this
+    abstains rather than guesses: an unparseable URL must not tell a correctly
+    configured HTTPS response that its reporting is void.
     """
+    if secure is None:
+        return True
     return secure or (host is not None and _is_loopback(host.strip().lower()))
 
 
@@ -1089,26 +1128,40 @@ def _suppress_redundant(findings, present):
     return [f for f in findings if f.code not in suppressed]
 
 
-def analyze_all(present, secure=True, host=None):
-    """analyze() across every present header, plus the missing ones and any
-    cross-header suppressions.
+def analyze(exchange):
+    """Every finding for one exchange.
 
-    `present` maps header names to their raw values, in any casing: names are
-    normalised here, so a response spelled `X-Frame-Options` is neither reported
-    missing nor analyzed twice. `secure` tells whether the response arrived over
-    TLS, which decides whether a missing HSTS header means anything, and `host`
-    is the name it was fetched from, which is the one question a response cannot
-    answer about itself. This is the entry point callers should use; analyze() is
-    public for unit testing.
+    The scheme and host come from the request URL rather than from arguments,
+    which is what stops a caller silently claiming TLS by omission -- the old
+    `secure=True` default. A URL that will not parse, or carries no scheme,
+    yields "" from `scheme()`, and that is a third state rather than a
+    disguised plaintext: `secure` is `True` over https, `False` over any other
+    known scheme, and `None` when the scheme is unknown -- collapsing unknown
+    into plaintext would answer a question nobody supplied the input for.
+    `host` reads None the same way, from an empty hostname. Header names are
+    normalised here, so a response spelled `X-Frame-Options` is neither
+    reported missing nor analyzed twice.
     """
-    present = _normalize(present)
-    findings = _report_missing(present, secure)
+    present = _mapping(exchange.response.headers)
+    url = exchange.request.url
+    scheme_name = _scheme(url)
+    if scheme_name == "https":
+        secure = True
+    elif scheme_name:
+        secure = False
+    else:
+        # The URL did not parse, or carried no scheme. Unknown is not the
+        # same fact as plaintext, and collapsing the two invents an answer
+        # nobody supplied.
+        secure = None
+    host = _host(url) or None
+    findings = _report_missing(present, secure, exchange.response.status)
     for name, values in present.items():
         if name == "content-security-policy":
             findings.extend(_analyze_csp_all(values))
             continue
         for value in values:
-            findings.extend(analyze(name, value))
+            findings.extend(_analyze_header(name, value))
     findings.extend(_analyze_isolation(present))
     findings.extend(_analyze_policy_overlap(present))
     findings.extend(_analyze_cors(present))
@@ -1126,7 +1179,7 @@ def analyze_all(present, secure=True, host=None):
     return _suppress_redundant(unique, present)
 
 
-def inventory(present):
+def inventory(exchange):
     """What the response carries, before anything is judged about it.
 
     Five tables, and the split between them is the point. `security` and
@@ -1152,9 +1205,9 @@ def inventory(present):
     Nothing here is withheld because of what it contains, which is why there is
     no `secure` argument. A plaintext response is still missing HSTS and this
     says so; whether that absence is a *finding* is a judgment, and judgments
-    are analyze_all's business.
+    are analyze's business.
     """
-    present = _normalize(present)
+    present = _mapping(exchange.response.headers)
     return {
         "security": _filter_headers(
             present,
