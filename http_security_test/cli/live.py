@@ -151,18 +151,37 @@ def raw_head(response):
     return line + "".join("%s: %s\r\n" % pair for pair in response.headers.items())
 
 
+def request_headers(url, options):
+    """The header pairs the CLI genuinely knows it sent, in send order.
+
+    Host first (the authority implied by the URL, matching what urllib itself
+    sends), then User-Agent, then whatever `-H` added. Nothing invented: no
+    Accept-Encoding, no Connection: close -- see raw_request()'s docstring for
+    why those two are genuinely absent from what this package can honestly
+    claim was sent. Names keep the caller's casing rather than urllib's:
+    Request.add_header() runs key.capitalize() before anything reaches the
+    wire, so "User-Agent" goes out as "User-agent" -- harmless, since header
+    names are case-insensitive per RFC 9110 §5.1, and left uncorrected on
+    purpose so this field stays faithful to what was configured.
+    """
+    pairs = [
+        ("Host", urllib.parse.urlsplit(url).netloc),
+        ("User-Agent", options.user_agent),
+    ]
+    for header in options.headers:
+        name, _, value = header.partition(":")
+        pairs.append((name.strip(), value.strip()))
+    return tuple(pairs)
+
+
 def raw_request(url, options):
     """The request head as text, near enough for the round trip."""
     parts = urllib.parse.urlsplit(url)
     path = parts.path or "/"
     if parts.query:
         path += "?" + parts.query
-    lines = [
-        "%s %s HTTP/1.1" % (options.method, path),
-        "Host: %s" % parts.netloc,
-        "User-Agent: %s" % options.user_agent,
-    ]
-    lines.extend(options.headers)
+    lines = ["%s %s HTTP/1.1" % (options.method, path)]
+    lines.extend("%s: %s" % pair for pair in request_headers(url, options))
     return "\r\n".join(lines) + "\r\n\r\n"
 
 
@@ -231,10 +250,18 @@ def fetch(target, options, opener=None, chain=None):
         raw=raw_response_text,
         fidelity="reconstructed" if raw_response_text is not None else None,
     )
-    request_message = (
-        Request.from_bytes(raw_request_text, url=url, fidelity="reconstructed")
-        if raw_request_text is not None
-        else Request.from_parts(url=url)
+    # Same discipline on the request side, which used to be asymmetric: method
+    # and headers came from Request.from_bytes(raw_request_text, ...) only
+    # when --raw parsed them out of the reassembled text, leaving method=None
+    # and headers=() the rest of the time. Built from options and url always,
+    # --raw or not, so a flag that only controls evidence cannot also decide
+    # what the request object says was sent.
+    request_message = Request.from_parts(
+        url=url,
+        method=options.method,
+        headers=request_headers(url, options),
+        raw=raw_request_text,
+        fidelity="reconstructed" if raw_request_text is not None else None,
     )
 
     facts = outcome.Run(

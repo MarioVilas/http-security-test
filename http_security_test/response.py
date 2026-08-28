@@ -615,13 +615,26 @@ def _missing_tag(name):
 
 
 # Headers that protect a representation. A 3xx carries none, so demanding them
-# there is a false positive once per hop -- measured at six on a bare 301.
-# HSTS is deliberately absent: on the https legs of a chain a redirect is
-# exactly where it matters.
+# there is a false positive once per hop. Permissions-Policy and
+# Cross-Origin-Embedder-Policy belong for the identical reason: a 3xx creates
+# no document, so there is nothing for either to govern (webref's
+# permissions-policy-1.json create-from-response algorithm runs only at
+# document creation, and COEP is the same shape -- it governs an isolated
+# document's loading rules). Measured on a bare 301: seven of these eight are
+# unconditional -- csp-missing, coop-missing, corp-missing, pp-missing,
+# rp-missing, xcto-missing and xfo-missing all fired before this tuple existed.
+# coep-missing is the eighth and was never among them on a *bare* redirect --
+# _suppress_redundant's sibling rule already excuses it whenever COOP does not
+# ask for isolation, which a bare redirect never does -- but it does fire, and
+# this tuple does suppress it, once COOP is present as same-origin too (see
+# tests/test_headers.py). HSTS is deliberately absent from this tuple: on the
+# https legs of a chain a redirect is exactly where it matters.
 REPRESENTATION_HEADERS = (
     "Content-Security-Policy",
+    "Cross-Origin-Embedder-Policy",
     "Cross-Origin-Opener-Policy",
     "Cross-Origin-Resource-Policy",
+    "Permissions-Policy",
     "Referrer-Policy",
     "X-Content-Type-Options",
     "X-Frame-Options",

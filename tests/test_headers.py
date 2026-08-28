@@ -85,19 +85,42 @@ def test_the_old_entry_points_are_gone():
     assert not hasattr(headers, "analyze_all")
 
 
-# The six representation-scoped headers a bare redirect used to be scolded for.
+# The representation-scoped headers a bare redirect used to be scolded for.
+# Permissions-Policy and Cross-Origin-Embedder-Policy belong by the identical
+# reasoning as the original six and are pinned here too, but coep-missing
+# cannot join this set: _suppress_redundant's sibling rule already excuses it
+# whenever COOP does not ask for isolation (see _seeks_isolation in
+# isolation.py), so it is only ever a candidate when COOP is *present* as
+# same-origin -- and a present COOP is then no longer itself missing.
+# coop-missing and coep-missing can therefore never appear together in one
+# exchange, so this set carries the seven that can, and coep-missing gets its
+# own tests below instead.
 REPRESENTATION_MISSING = {
-    "csp-missing", "coop-missing", "corp-missing",
+    "csp-missing", "coop-missing", "corp-missing", "pp-missing",
     "rp-missing", "xcto-missing", "xfo-missing",
 }
 
 
 def test_a_bare_redirect_is_not_scolded_for_headers_it_has_nothing_to_protect():
-    # Measured before the fix: a bare 301 emitted all six. That is principle 4
-    # once per hop, and it is why --all-hops was blocked.
+    # Measured before the fix: a bare 301 emitted hsts-missing and pp-missing
+    # only. coep-missing was never a candidate on a bare redirect to begin
+    # with -- COOP is absent, so the sibling rule above already excused it,
+    # which is exactly why it needs its own test instead of a place in the set.
     codes = {f.code for f in headers.analyze(_ex({"Location": "https://example.com/next"},
                                                   status=301))}
     assert not (codes & REPRESENTATION_MISSING)
+    assert "coep-missing" not in codes
+
+
+def test_a_redirect_seeking_isolation_is_not_scolded_for_coep_either():
+    # coep-missing only survives the sibling-suppression rule once COOP asks
+    # for isolation, so this is the case that actually exercises the fix for
+    # Cross-Origin-Embedder-Policy. Measured before the fix, this combination
+    # emitted coep-missing and pp-missing alongside the correct hsts-missing.
+    codes = {f.code for f in headers.analyze(_ex(
+        {"Cross-Origin-Opener-Policy": "same-origin"}, status=301))}
+    assert "coep-missing" not in codes
+    assert "pp-missing" not in codes
 
 
 def test_hsts_is_still_demanded_on_a_redirect():
@@ -108,12 +131,22 @@ def test_hsts_is_still_demanded_on_a_redirect():
     assert "hsts-missing" in codes
 
 
-def test_a_200_still_gets_all_six():
+def test_a_200_still_gets_the_seven_unconditional_ones():
     codes = {f.code for f in headers.analyze(_ex({}, status=200))}
     assert REPRESENTATION_MISSING <= codes
 
 
-def test_an_unknown_status_still_gets_all_six():
+def test_a_200_still_gets_coep_missing_when_it_is_a_candidate():
+    # coep-missing needs COOP: same-origin present to be a candidate at all
+    # (see the comment on REPRESENTATION_MISSING above), which is why this is
+    # not a bare {}.
+    codes = {f.code for f in headers.analyze(_ex(
+        {"Cross-Origin-Opener-Policy": "same-origin"}, status=200))}
+    assert "pp-missing" in codes
+    assert "coep-missing" in codes
+
+
+def test_an_unknown_status_still_gets_the_seven_unconditional_ones():
     # Absent status disables nothing: not knowing the status is not evidence
     # that the response carried no representation.
     codes = {f.code for f in headers.analyze(_ex({}, status=None))}

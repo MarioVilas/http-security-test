@@ -996,7 +996,7 @@ broken by an agent that had read the section and filed it under taste.
   it worth reporting, and they only exist once the cookie parser does.
 - **`Pragma: no-cache` with nothing enforcing it** — same parcel, same reason: it
   is the other half of "does the analyzer judge cache values at all", and
-  `find_cache_headers()` currently promises it does not. One code,
+  `inventory()`'s `caching` table currently promises it does not. One code,
   `pragma-ineffective`, `error`, cross-header, in `response.py`. It fires only
   when no `Cache-Control` prevents storage. **Not a `DEPRECATED_HEADERS` entry**
   even though RFC 9111 §5.4 does say "this specification deprecates Pragma": that
@@ -1060,17 +1060,32 @@ broken by an agent that had read the section and filed it under taste.
 - **`--all-hops`, no longer blocked on the analyser.** The CLI can analyse every
   hop of a redirect chain and the envelope is specified for it; it stays
   reserved rather than shipped (see **Status**), but the analyser-side reason it
-  used to be blocked is gone. The blocker was structural: a bare 301 used to
-  produce **six warnings** — `csp-missing`, `coop-missing`, `corp-missing`,
-  `rp-missing`, `xcto-missing`, `xfo-missing` — on a response that carries no
+  used to be blocked is gone -- more completely than the commit that first
+  closed it left it. The blocker was structural: with no
+  `REPRESENTATION_HEADERS` suppression at all, a bare 301 produced **eight
+  findings** — the correct `hsts-missing` plus seven false positives,
+  `csp-missing`, `coop-missing`, `corp-missing`, `pp-missing`, `rp-missing`,
+  `xcto-missing` and `xfo-missing` — on a response that carries no
   representation for any of them to protect, because the old `analyze_all`
-  never saw a status line. `analyze()` now reads `exchange.response.status`
-  directly (`_report_missing()`'s third argument), so per-hop analysis no
-  longer misfires on the representation-scoped headers. Note HSTS was always
-  correctly *absent* from that list: on the https legs of a chain a redirect is
-  precisely where HSTS matters, so per-hop analysis is genuinely valuable and it
-  was only the representation-scoped headers that misfired. Shipping the flag
-  itself is CLI orchestration work — walking `Run.hops`, building one
+  never saw a status line. The commit that introduced `REPRESENTATION_HEADERS`
+  suppressed six of those seven and missed `pp-missing`, even though
+  `Permissions-Policy` was already in `SECURITY_HEADERS` at the time: it governs
+  which features the *document* a response creates may use, and a 3xx creates
+  no document, so the reasoning was identical to the other six and simply was
+  not applied to it. `coep-missing` is the eighth and was not part of that
+  oversight in the same way — `_suppress_redundant`'s sibling rule already
+  excuses it whenever COOP does not ask for isolation, which a bare redirect
+  never does, so it was never actually observable on a *bare* 301; it only
+  surfaced, and only needed suppressing, on a redirect that also carried
+  `Cross-Origin-Opener-Policy: same-origin`. Both are now in
+  `REPRESENTATION_HEADERS` for the same document-creation reasoning as the
+  original six, so `analyze()` — which now reads `exchange.response.status`
+  directly via `_report_missing()`'s third argument — no longer misfires on any
+  of the eight. Note HSTS was always correctly *absent* from that tuple: on the
+  https legs of a chain a redirect is precisely where HSTS matters, so per-hop
+  analysis is genuinely valuable and it is only the representation-scoped
+  headers that misfired. Shipping the flag itself is CLI orchestration work —
+  walking `Run.hops`, building one
   `Exchange` per hop, deciding how N reports nest in the envelope — not
   analyser work, which is why it is still reserved.
 - **Three finding families this task's types newly make checkable**, none

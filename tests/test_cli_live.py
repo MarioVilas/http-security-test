@@ -190,9 +190,11 @@ def test_raw_blobs_round_trip_through_the_library_parser():
     )
     _facts, item = live.fetch("https://example.com/", options, opener=opener)[0]
     assert parse_raw_headers(item.response.raw)["server"] == ["nginx"]
-    # Request.from_bytes stores what it parsed, as bytes -- from_bytes()
-    # converts text to latin-1 bytes rather than keeping the caller's str.
-    assert item.request.raw.startswith(b"GET / HTTP/1.1")
+    # Both messages go through from_parts() now, which keeps `raw` as
+    # whatever text live.py handed it rather than converting to bytes the way
+    # from_bytes() does -- Request.raw is a str here, the same as
+    # Response.raw already was.
+    assert item.request.raw.startswith("GET / HTTP/1.1")
     # live.py never captures wire bytes -- urllib does not expose them, and
     # raw_head()/raw_request() only rebuild an approximation (missing
     # Accept-Encoding, Connection: close, etc.). --raw decides only whether
@@ -236,6 +238,41 @@ def test_raw_does_not_change_what_the_analyser_reads():
     # And pinned against reassembly specifically: the live value survives with
     # its CRLF and tab intact, not rejoined into one line.
     assert captured.response.headers == (("Server", "nginx\r\n\tbuilt-from-source"),)
+
+
+def test_raw_does_not_change_what_the_request_object_says_was_sent():
+    # The same defect, on the request side. Before the fix, --raw decided
+    # whether the analysed Request carried a method and headers at all:
+    # Request.from_parts(url=url) when --raw was off left method=None and
+    # headers=(), while Request.from_bytes(raw_request_text, url=url,
+    # fidelity="reconstructed") when --raw was on parsed both back out of the
+    # reassembled text. Nothing analyses request headers yet, so this was
+    # latent -- but it is exactly the asymmetry already fixed on the response
+    # side. method and headers now come from options and url always; --raw
+    # only decides whether the reassembled bytes are attached as `raw`.
+    #
+    # The fixture has to carry something a broken implementation would
+    # visibly get wrong: empty options.headers would let both branches agree
+    # on headers=() by coincidence, so this adds one via -H. method is
+    # checked too, since the pre-fix defect left it None outright on the
+    # --raw-off branch rather than merely differently formatted.
+    options = OPTIONS._replace(headers=["X-Test: yes"])
+    response = FakeResponse("https://example.com/")
+    _facts, plain = live.fetch(
+        "https://example.com/", options, opener=FakeOpener(response)
+    )[0]
+    _facts, captured = live.fetch(
+        "https://example.com/", options._replace(raw=True), opener=FakeOpener(response)
+    )[0]
+    assert plain.request.method == captured.request.method == "GET"
+    assert plain.request.headers == captured.request.headers
+    assert dict(plain.request.headers)["X-Test"] == "yes"
+    # The only thing --raw actually adds: the reassembled bytes and their
+    # fidelity label -- never a capture claim, per raw_request()'s docstring.
+    assert plain.request.raw is None
+    assert plain.request.fidelity is None
+    assert captured.request.raw is not None
+    assert captured.request.fidelity == "reconstructed"
 
 
 def test_the_chain_follows_an_in_scope_redirect():
