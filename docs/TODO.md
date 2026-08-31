@@ -6,7 +6,7 @@ In no particular order:
 
 ## Ideas
 
-- cookies analysis (flags + heuristically detect session cookies + detect privacy cookies)
+- maybe expand cookies analysis (detect privacy cookies? detect value entropy? attempt decoding of known cookies?)
 - jwt analysis (passive for sure cause it's basically free, probably not active since there are other tools for this anyway)
 - csrf token detection (maybe?)
 - add sarif output support
