@@ -203,6 +203,18 @@ def test_no_real_attribute_name_collides_at_threshold_one(real):
 
 # --- which attributes are recognised -------------------------------------
 
+def test_every_spelling_table_covers_the_keys_it_is_indexed_by():
+    # Both spelling tables are indexed with a bare subscript at their one call
+    # site -- `_ATTRIBUTE_SPELLING[suspected]` and `_PREFIX_SPELLING[prefix]`
+    # -- so a key added to the table they mirror without a spelling lands as a
+    # KeyError inside an analyser, on whichever cookie happens to trigger it.
+    # Safe today because both indexes can only be reached with a value that
+    # came out of the mirrored table; pinned because that is an argument about
+    # the current call sites, not about the tables.
+    assert set(cookies._ATTRIBUTE_SPELLING) == set(cookies.TYPO_SENSITIVE_ATTRIBUTES)
+    assert set(cookies._PREFIX_SPELLING) == set(cookies.COOKIE_PREFIXES)
+
+
 def test_the_recognised_set_is_the_browser_union():
     # Chromium parsed_cookie.cc:62-70 -- a superset of Firefox's eight. The
     # extra is `priority`: Chrome-proprietary, never standardised, and sent by

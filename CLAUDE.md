@@ -94,7 +94,7 @@ a fresh subprocess must not pull `http_security_test.cli` or
 keep the claim in the opening paragraph true.
 
 `catalog.py` is a leaf on purpose and **no analyser may import it**. The
-analysers emit `(header, code, data)` and hold no prose; only `reporting.py` and
+analysers emit `(header, code, data, level)` and hold no prose; only `reporting.py` and
 a consumer calling `describe()` turn that into a sentence. A test reads the
 syntax of every `Finding()` call to keep it that way -- prose in a comment or a
 docstring is ordinary English and fine, a sentence passed as `data` is not.
@@ -133,7 +133,9 @@ every question about reporting is a cross-header question by construction.
 These were expensive to arrive at. Do not quietly reverse them.
 
 1. **Findings are facts; ratings are policy — but published.** A finding is
-   `(header, code, data)`. The ratings are SARIF levels (`error` / `warning` /
+   `(header, code, data, level)`, where `level` is `None` for the common case
+   of a code whose rating never varies. The ratings are SARIF levels
+   (`error` / `warning` /
    `note`) so a consumer can adopt, remap, or ignore them, and the wording is
    split off the same way: a template belongs to the rule and the values belong
    to the result, which is SARIF's `messageStrings` + `arguments` in all but
@@ -1788,7 +1790,7 @@ the long-form descriptions to land with the SARIF writer's `fullDescription`
 field removed the only thing a verbosity switch would have gated — do not
 reserve one now.
 
-**Tests:** 871 passing across 508 test functions, 122 of them CLI. `ruff check`
+**Tests:** 889 passing across 511 test functions, 122 of them CLI. `ruff check`
 clean. No test touches the network, with one deliberate exception: the redirect-
 limit test binds a loopback `http.server` on an ephemeral port, because urllib's
 own redirect bookkeeping cannot be tested any other way.

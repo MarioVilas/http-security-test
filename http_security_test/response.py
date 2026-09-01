@@ -24,6 +24,7 @@ ones present mean together, and which findings a sibling header has already made
 moot. The headers that belong to no family are judged here too.
 """
 
+import ipaddress
 import json
 import re
 
@@ -748,21 +749,37 @@ def _is_loopback(host):
     under it, the IPv6 loopback, and the whole of 127.0.0.0/8 rather than just
     127.0.0.1.
 
-    Both spellings of the IPv6 loopback are accepted, and that is not
-    belt-and-braces: the two callers disagree about brackets. `_delivers()`
-    re-attaches them by hand after taking the port off an authority, while
-    `_reporting_endpoints_apply()` and the cookie caller in `analyze()` pass
-    `exchange.host()`, which is `urlsplit().hostname` and has the brackets
-    stripped. Testing only the bracketed form made the second kind of caller
-    silently answer False on `http://[::1]/`, which cost a correct cookie two
-    false `error` findings.
+    Parsed with `ipaddress` rather than compared as text, because four callers
+    reach this predicate and no two of them spell an address the same way.
+    `_delivers()` re-attaches brackets by hand after taking the port off an
+    authority; `_reporting_endpoints_apply()` and the cookie caller in
+    `analyze()` pass `exchange.host()`, which is `urlsplit().hostname` with the
+    brackets already stripped. An earlier version compared against the two
+    literals `"[::1]"` and `"::1"`, which answered False for `0:0:0:0:0:0:0:1`
+    and for the IPv4-mapped `::ffff:127.0.0.1` -- and cost a correct cookie two
+    false `error` findings on the bracketless spelling before that half was
+    fixed. Parsing answers for every spelling of the same address at once,
+    which is the only way this stops recurring.
+
+    Two details the stdlib does not hand over for free. `is_loopback` on an
+    IPv6 address tests `::1` exactly, so an IPv4-mapped address has to be
+    asked separately through `ipv4_mapped` -- Chromium's `IsLocalhost` does
+    the same. And parsing *tightens* the old behaviour as well as widening it:
+    the previous octet test accepted `127.999.999.999` and any four
+    dot-separated Unicode digit runs beginning `127`, because `str.isdigit()`
+    admits `\u0661` and friends. Neither is an address, so neither was ever
+    trustworthy.
     """
     if host == "localhost" or host.endswith(".localhost"):
         return True
-    if host in ("[::1]", "::1"):
+    try:
+        address = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return False
+    if address.is_loopback:
         return True
-    octets = host.split(".")
-    return len(octets) == 4 and octets[0] == "127" and all(o.isdigit() for o in octets)
+    mapped = getattr(address, "ipv4_mapped", None)
+    return mapped is not None and mapped.is_loopback
 
 
 def _split_dictionary(value):

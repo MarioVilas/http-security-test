@@ -1086,6 +1086,10 @@ COOKIE_CASES = [
     # loopback origin is potentially trustworthy however it is spelled.
     ({"Set-Cookie": ["__Secure-sid=abc; Secure; HttpOnly; SameSite=Lax"]},
      "http://[::1]:8000/"),
+    # The flag form of SameSite, so its own sentence reaches the snapshot --
+    # it is worded differently from the SameSite=<value> form and was
+    # previously rendered by no corpus case.
+    ({"Set-Cookie": ["a=b; SameSite; Secure"]}, "https://example.com/"),
 ]
 
 
@@ -1357,8 +1361,7 @@ def test_a_report_with_blobs_is_still_json_serialisable():
 # The message catalog
 # ---------------------------------------------------------------------------
 # The analysers hold no prose: they emit (header, code, data, level) and
-# catalog.py
-# turns that into a sentence. Three things can go wrong, and each is pinned
+# catalog.py turns that into a sentence. Three things can go wrong, and each is pinned
 # here, because none of them shows up as a failing analysis -- they show up as
 # a crash or a blank in whatever renders the findings.
 
@@ -2476,6 +2479,31 @@ def test_the_whole_loopback_range_is_left_alone():
     # potentially trustworthy is 127.0.0.0/8, not just 127.0.0.1
     present = dict(CSP_REPORTS_NOWHERE, **{"reporting-endpoints": 'csp-ep="http://127.0.0.2/r"'})
     assert group_codes(present) == []
+
+
+@pytest.mark.parametrize("host", [
+    "::1", "[::1]",                 # the two spellings the callers disagree about
+    "0:0:0:0:0:0:0:1",              # the same address written out in full
+    "::ffff:127.0.0.1",             # IPv4-mapped: NOT is_loopback in the stdlib
+    "::ffff:7f00:1",                # the same, in hex
+    "127.0.0.1", "127.0.0.2", "127.255.255.255",   # the whole of 127.0.0.0/8
+    "localhost", "sub.localhost",
+])
+def test_every_loopback_spelling_is_trustworthy(host):
+    # One predicate, four callers, and no two of them spell an address the same
+    # way. Chromium's IsLocalhost accepts all of these, and an IPv4-mapped
+    # address needs asking separately because the stdlib's is_loopback tests
+    # ::1 exactly.
+    assert response._is_loopback(host)
+
+
+@pytest.mark.parametrize("host", [
+    "128.0.0.1", "8.8.8.8", "example.com", "localhost.evil.com", "",
+    "127.999.999.999",              # not an address at all; the old octet test said yes
+    "\u0661.\u0662.\u0663.\u0664",  # Arabic-Indic digits: str.isdigit() said yes
+])
+def test_a_non_loopback_host_is_not_trustworthy(host):
+    assert not response._is_loopback(host)
 
 
 def test_a_bracketed_ipv6_loopback_endpoint_is_left_alone():

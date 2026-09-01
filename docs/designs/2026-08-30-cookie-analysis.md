@@ -420,10 +420,16 @@ is `w3c/webref`'s `ed/algorithms/rfc6265bis.json` algorithm [8] ("If the
 remainder of attribute-value contains a non-DIGIT character, ignore the
 cookie-av"), and the precedence is RFC 6265 4.1.2.2 verbatim -- "If a cookie
 has both the Max-Age and the Expires attribute, the Max-Age attribute has
-precedence and controls the expiration date of the cookie." Note the webref
-extract of the *storage model* is not usable for this: its `Store a Cookie`
-steps carry the `Max-Age` branch and lose the `Otherwise ... Expires` one, an
-extraction artefact of the kind CLAUDE.md warns about on the `main` branch.
+precedence and controls the expiration date of the cookie." The webref extract
+of the *storage model* agrees, but reading it takes one trick worth recording:
+the `Otherwise ... Expires` branch is **not** a sibling entry in that step's
+`steps` array, it hangs off the same step's **`additional`** key, with its own
+nested `steps` beneath it. A walker that recurses only through `steps` sees the
+`Max-Age` branch and concludes the `Expires` one is missing. It is not missing.
+An earlier draft of this paragraph called it an extraction artefact and was
+wrong; the general lesson is that reffy models an "Otherwise" as an
+`additional` block rather than as another step, so any traversal of
+`ed/algorithms/` has to follow both keys.
 
 An `Expires` a browser cannot parse at all is excluded, because it sets no
 expiry and so is not persistence either; the same goes for a cookie whose only
