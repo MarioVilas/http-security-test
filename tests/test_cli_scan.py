@@ -218,6 +218,17 @@ def test_output_all_writes_every_implemented_format(tmp_path, capsys):
     assert (tmp_path / "run.txt").exists()
 
 
+def test_ignore_cookie_is_reserved_and_refused(capsys):
+    # Reserved-and-documented, like the sarif/ndjson output formats: a flag
+    # that parses and silently does nothing is worse than one that says so.
+    code = commands.do_scan(
+        parse(["scan", "--ignore-cookie", "AWSALB", "https://a.test/"]),
+        source=source_of(ok("https://a.test/")),
+    )
+    assert code == 2
+    assert "--ignore-cookie" in capsys.readouterr().err
+
+
 def test_oA_without_a_space_degrades_to_a_loud_usage_error(capsys):
     # argparse reads `-oArun` as `-o Arun`; format resolution then rejects it.
     # Loud, not silent, which is the acceptable outcome -- pinned so it stays so.

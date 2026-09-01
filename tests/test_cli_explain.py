@@ -38,7 +38,9 @@ def test_explain_with_no_arguments_lists_every_code(capsys):
     # head line of each block: one per code, no more, no fewer.
     assert main(["explain"]) == 0
     out = capsys.readouterr().out
-    listed = re.findall(r"^(\S+)\s+(?:error|warning|note)\s", out, re.MULTILINE)
+    # An escalatable code's level carries a trailing '*' (a floor marker), so
+    # the level alternation admits one before the column's padding.
+    listed = re.findall(r"^(\S+)\s+(?:error|warning|note)\*?\s", out, re.MULTILINE)
     assert listed == sorted(FINDING_SEVERITY)
     for code in FINDING_SEVERITY:
         assert code in out
@@ -92,6 +94,18 @@ def test_explain_says_nothing_about_consequences_when_there_are_none(capsys):
     main(["explain", "rt-invalid"])
     out = capsys.readouterr().out
     assert "consequences" not in out
+
+
+def test_an_escalatable_code_says_its_level_is_a_floor(capsys):
+    main(["explain", "cookie-no-httponly"])
+    out = capsys.readouterr().out
+    assert "note" in out
+    assert "may escalate" in out
+
+
+def test_a_fixed_code_does_not(capsys):
+    main(["explain", "hsts-missing"])
+    assert "may escalate" not in capsys.readouterr().out
 
 
 def test_a_bare_target_is_a_usage_error_that_names_the_verb(capsys):

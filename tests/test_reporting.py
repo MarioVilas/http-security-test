@@ -90,3 +90,8 @@ def test_the_request_side_carries_its_own_fidelity():
     # And when the request carries no raw, it carries no fidelity either --
     # the response side's fidelity above must not leak across.
     assert "request" not in headers.report(_bare_exchange())
+
+
+def test_the_report_writes_a_findings_own_level():
+    finding = headers.Finding("Set-Cookie", "hsts-missing", {}, "note")
+    assert headers.finding_as_dict(finding, message=False)["level"] == "note"

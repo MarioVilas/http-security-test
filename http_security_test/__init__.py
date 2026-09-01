@@ -43,9 +43,18 @@ the lowercased name -> [values] view analyze() and inventory() derive from
 parse_raw_headers() build that same view directly from (name, value) pairs or
 a raw header block, for a caller who wants it without a Response around it.
 
-A finding carries no prose: it is `(header, code, data)`, and describe() turns
-one into a sentence from the catalog. A consumer that would rather write its own
-wording, or none, can read `data` and ignore the catalog entirely.
+A finding carries no prose: it is `(header, code, data, level)`, and describe()
+turns one into a sentence from the catalog. A consumer that would rather write
+its own wording, or none, can read `data` and ignore the catalog entirely.
+
+`level` is the fourth field and is usually None, meaning "the rating this code
+always has" -- `severity(code)`. A finding whose severity depends on what its
+`data` says fills it in instead, which today is the cookie hardening ladder and
+nothing else: `ESCALATABLE` names exactly the codes allowed to. Read a level
+with `level_of(finding)`, which resolves the two; reading `severity(f.code)`
+gets the floor, not the verdict. Unpacking a finding as three values raises
+`ValueError`, so `identity(finding)` is what to key on rather than a
+hand-written tuple.
 
 `adaptors` and (later) `formats` are deliberately NOT imported here. Importing
 this package pulls in the analysis core and nothing else, which is what lets it
@@ -60,11 +69,13 @@ from .findings import (
     CODE_CONSEQUENCES,
     CODE_HEADER,
     CODE_TAXONOMY,
+    ESCALATABLE,
     FINDING_SEVERITY,
     SEVERITIES,
     Finding,
     consequences,
     identity,
+    level_of,
     order_findings,
     severity,
     taxonomy,
@@ -89,6 +100,7 @@ __all__ = [
     "CODE_TAXONOMY",
     "CONSEQUENCES",
     "DEPRECATED_HEADERS",
+    "ESCALATABLE",
     "FINDING_SEVERITY",
     "HEADER_DOCS",
     "INFORMATION_HEADERS",
@@ -108,6 +120,7 @@ __all__ = [
     "header_url",
     "identity",
     "inventory",
+    "level_of",
     "mapping",
     "order_findings",
     "parse_csp",

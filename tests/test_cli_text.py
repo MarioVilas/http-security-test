@@ -16,9 +16,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import copy
 import os
 import pathlib
 
+from http_security_test import cookies
 from http_security_test.cli import outcome, text
 
 SNAPSHOT = pathlib.Path(__file__).parent / "cli_terminal_snapshot.txt"
@@ -101,6 +103,59 @@ DOCUMENT = {
         },
     ],
 }
+
+
+def _document_with_cookies(rows):
+    """The module's DOCUMENT with a cookies inventory spliced in."""
+    document = copy.deepcopy(DOCUMENT)
+    document["results"][0]["report"]["response"]["inventory"]["cookies"] = rows
+    return document
+
+
+def test_the_cookies_table_renders_one_line_per_cookie():
+    rows = [
+        cookies.cookie_as_dict(
+            cookies.parse_set_cookie("sid=abc; Secure; HttpOnly; SameSite=Strict")
+        ),
+        cookies.cookie_as_dict(cookies.parse_set_cookie("lang=en")),
+    ]
+    out = text.render(_document_with_cookies(rows))
+    assert "cookies:" in out
+    assert "sid" in out and "lang" in out
+
+
+def test_an_unjudged_cookie_says_so():
+    rows = [cookies.cookie_as_dict(cookies.parse_set_cookie("AWSALB=x"))]
+    out = text.render(_document_with_cookies(rows))
+    assert "not judged" in out
+
+
+def test_no_cookies_table_when_the_response_sets_none():
+    assert "cookies:" not in text.render(_document_with_cookies([]))
+
+
+def test_the_terminal_never_prints_a_cookie_value():
+    # The JSON carries values in full and deliberately -- this package does
+    # not redact, and redaction before anything reaches a report is the
+    # consumer's job. The TERMINAL is a summary, so a value there is noise.
+    # This test exists because every other cookie assertion in this file is a
+    # substring presence check, and all of them keep passing if a future edit
+    # appends row["value"] to the flags list in _inventory_lines.
+    rows = [
+        cookies.cookie_as_dict(cookies.parse_set_cookie(
+            "sid=UNIQUE-SENTINEL-VALUE-9f3a; Secure; HttpOnly; SameSite=Strict"
+        )),
+        cookies.cookie_as_dict(
+            cookies.parse_set_cookie("AWSALB=SENTINEL-ROUTING-7b21")
+        ),
+    ]
+    out = text.render(_document_with_cookies(rows))
+    # the names and attributes are wanted...
+    assert "sid" in out and "AWSALB" in out
+    assert "SameSite=Strict" in out
+    # ...the values are not, judged or unjudged
+    assert "UNIQUE-SENTINEL-VALUE-9f3a" not in out
+    assert "SENTINEL-ROUTING-7b21" not in out
 
 
 def test_render_returns_a_string_ending_in_a_newline():
@@ -233,3 +288,29 @@ def test_cli_snapshot_matches():
     if os.environ.get("UPDATE_CLI_SNAPSHOT"):
         SNAPSHOT.write_text(produced, encoding="utf-8")
     assert SNAPSHOT.read_text(encoding="utf-8") == produced
+
+
+# --- final review, M2 and M3: the cookies table's two wrong renderings ------
+
+def test_a_nameless_cookie_gets_the_same_placeholder_the_catalog_gives_it():
+    # An empty name is legal (rfc6265bis 5.2 step 3). Task 6 gave it a
+    # readable subject in catalog.py; the inventory renderer never got the
+    # same fix and printed 28 blanks where a name belongs.
+    rows = [cookies.cookie_as_dict(cookies.parse_set_cookie("=__Host-sid=x"))]
+    out = text.render(_document_with_cookies(rows))
+    assert "a nameless cookie" in out
+    assert "\n                               " not in out
+
+
+def test_a_cookie_with_only_non_security_attributes_is_not_called_bare():
+    # `flags` inspects five attributes, so Path and Expires render as "no
+    # attributes" -- factually wrong, and it hid the persistence on exactly
+    # the infrastructure cookies whose findings are suppressed.
+    rows = [
+        cookies.cookie_as_dict(cookies.parse_set_cookie(
+            "AWSALB=x; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT"
+        ))
+    ]
+    out = text.render(_document_with_cookies(rows))
+    assert "no security attributes" in out
+    assert "no attributes\n" not in out

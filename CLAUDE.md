@@ -27,6 +27,7 @@ hsts.py        Strict-Transport-Security + the ONLY third-party dependency
 isolation.py   COOP / COEP / CORP / CORS
 policies.py    Permissions-Policy + Feature-Policy
 legacy.py      the obsolete headers
+cookies.py     Set-Cookie: the parser, the name tables, the analysis
 response.py    tables, registry, cross-header rules, analyze, inventory, orphans
 reporting.py   report(): findings + inventories as plain data, ready for JSON
 __init__.py    public API -- the core only, see its own docstring
@@ -65,7 +66,8 @@ layers, each free to import its own layer and anything below it, never above:
 
 ```
 core       findings, catalog, message, references, csp, hsts, isolation,
-           policies, legacy, response, reporting, exchange   -> stdlib only
+           policies, legacy, cookies, response, reporting, exchange
+                                                             -> stdlib only
 adaptors   live library objects -> core types                -> imports core
 formats    Burp XML, HAR, SAZ, WCAT                          -> NOT BUILT YET
 cli        argv, orchestration, writers, live.py             -> imports all above
@@ -135,7 +137,12 @@ These were expensive to arrive at. Do not quietly reverse them.
    `note`) so a consumer can adopt, remap, or ignore them, and the wording is
    split off the same way: a template belongs to the rule and the values belong
    to the result, which is SARIF's `messageStrings` + `arguments` in all but
-   name. `data` is the contract; the sentence is a convenience.
+   name. `data` is the contract; the sentence is a convenience. A rating is a
+   code's *default*, not its only possible level: a finding may carry its own,
+   which is SARIF's `result.level` overriding `rule.defaultConfiguration.level`
+   -- one defect can be worth more on one cookie than on another, and that is a
+   rating rather than a different fact. `ESCALATABLE` names the codes that do
+   this and `level_of()` resolves a finding's own level or its code's default.
 2. **Inventories are facts, findings are judgments.** Nothing is withheld from an
    inventory because of what it contains. HSTS appears in a `missing` inventory on
    a plaintext target; the *finding* is what `secure=False` suppresses.
@@ -182,9 +189,10 @@ mutation-verified.
 - Findings are deduped by `identity()` — `(header, code, data)` — never by
   `code` alone and no longer by `(header, code)` either. The pair was right only
   while a finding carried prose: two `X-Frame-Options` values that are both
-  invalid are two facts, and two cookies each missing `Secure` will be two more.
-  A repeated header with *identical* values still reports once, because the data
-  is identical too.
+  invalid are two facts, and two cookies each missing the same attribute are two
+  more -- `test_two_cookies_missing_the_same_thing_are_two_findings`
+  (`tests/test_cookies.py`) is what exercises it. A repeated header with
+  *identical* values still reports once, because the data is identical too.
 - Every emittable code has a message template **and** every template's code is
   emittable — the same bijection the severities have, checked the same way.
   Separately, every finding the corpus can produce is rendered, because a
@@ -247,7 +255,7 @@ bullets below explain:
     ],
     "inventory": {
       "security": {}, "missing": [], "deprecated": {}, "information": {},
-      "caching": {}
+      "caching": {}, "cookies": []
     },
     "references": {"headers": ["Clear-Site-Data"],
                     "taxonomy": ["CAPEC-204", "CWE-525"]},
@@ -263,7 +271,9 @@ Decisions inside that shape, each of which had an alternative:
 - **A list of findings, not `{severity: [code]}`.** The old tool's schema grouped
   codes under a severity, which is lossless only while a code identifies one
   header and cannot repeat. Neither holds: `duplicate-headers` names several
-  headers today, and per-cookie findings will repeat within one header.
+  headers today, and per-cookie findings repeat within one header --
+  `test_two_cookies_missing_the_same_thing_are_two_findings`
+  (`tests/test_cookies.py`) is what exercises it.
 - **Nested by message, not flat.** Not only for the parked `request.py`:
   `Cache-Control` is *both* a request and a response header, so a bare `header`
   field could not say which one a finding meant once requests are analysed.
@@ -282,6 +292,12 @@ Decisions inside that shape, each of which had an alternative:
   key. `message` can be dropped entirely with `message=False`.
 - **`inventory()` takes no `secure`.** Principle 2: nothing is withheld from an
   inventory. HSTS is missing on a plaintext response and the inventory says so.
+- **`cookies` is the sixth inventory key, and the only one that is a list of
+  parsed objects rather than a header-name mapping.** `Set-Cookie` may legally
+  repeat and each value is an unrelated cookie, so a mapping keyed by name
+  would drop one of two cookies sharing a name. It is derived independently of
+  `findings` -- principle 2 again, in the other direction from the false
+  positive: a correctly configured cookie still earns its row.
 - **`security` and `missing` are two halves of one question, with four
   exceptions.** `REPORTING_HEADERS` (`Report-To`, `Reporting-Endpoints`),
   `CORS_HEADERS` (the six response-side `Access-Control-*`),
@@ -313,7 +329,7 @@ Decisions inside that shape, each of which had an alternative:
   charset parameter alone, so `information` and `caching` cannot take it —
   both mean *never analysed*. And it is not a security header: OWASP's
   250 000-domain corpus tracks 17 names and `content-type` is **not among
-  them**, which is an independent check rather than an opinion. A sixth
+  them**, which is an independent check rather than an opinion. A seventh
   inventory key for it was designed on 2026-08-24 and deferred, because one
   member is ceremony by this project's own three-implementations rule. **The
   trigger: a second analysed-but-not-security header.** `Vary` is the nearest
@@ -571,6 +587,14 @@ an odd one, and the odd one is loud anyway.
   entry matched a 12-space constructor argument and corrupted a `Finding`). And an
   anchor edited earlier in the session no-ops without complaint. Assert the anchor
   exists and is unique before replacing.
+- **A section number copied out of browser source needs re-checking.** The URL
+  in Chromium's `net/cookies/cookie_constants.h:391` cites
+  `draft-ietf-httpbis-rfc6265bis-13`; the current revision is -22, and the
+  section numbering moved. Browser comments cite the draft they were written
+  against, so read the number as a date stamp rather than a reference — and go
+  to the draft text (or `w3c/webref`'s extract of it) for the number itself.
+  This generalises past cookies: any living-standard citation in an engine
+  checkout is as old as the line it sits on.
 - **`urllib.parse` is core; `urllib.request` is not.** `exchange.py` imports
   `urllib.parse` for `scheme()` and `host()` — string parsing, no socket — and
   that belongs in `core` same as any other stdlib import; `urllib.request` is
@@ -858,8 +882,9 @@ broken by an agent that had read the section and filed it under taste.
   and how CAPEC-468 was eliminated.
 - **CWE's cookie coverage is unusually rich** — 1004 (`HttpOnly`), 1275
   (`SameSite`), 614 (`Secure`), 315, 539, 565, 784 — which maps almost
-  one-to-one onto the parked `Set-Cookie` prefix work below. Reach for it
-  first when that item lands rather than starting the CWE search from zero.
+  one-to-one onto the `Set-Cookie` prefix rules `cookies.py` now implements.
+  None of the cookie codes carry a `CODE_TAXONOMY` entry yet; reach for this
+  list first when they do, rather than starting the CWE search from zero.
 
 ## Parked, with intent to do
 
@@ -873,127 +898,20 @@ broken by an agent that had read the section and filed it under taste.
   default of the analysis engine. The CLI now exists and reserves the switch as
   `--include-report-only`, documented and unimplemented; that is the hook, and
   the codes are still the work.
-- **`Set-Cookie` analysis** — `Secure`, `HttpOnly`, `SameSite=None` without
-  `Secure`, and the `__Host-` / `__Secure-` prefix rules. Both blockers are now
-  gone: the mapping supports repeated headers, and `identity()` means a code can
-  fire more than once against one header without the second being deduped away.
-  Put the cookie's name in `data` so two cookies are two findings.
-
-  **The prefix rules are settled — from the specs *and* from source, which
-  agree — and there are four of them, not the two this item was written
-  around.** Chromium's `net/cookies/cookie_util.cc`, Firefox's
-  `netwerk/cookie/CookiePrefixes.cpp` and the draft text all match exactly;
-  read the Firefox file first, it is 102 lines. All four build on `__Secure-`,
-  and `__Host-Http-` is the conjunction of the two below it — it is a lattice,
-  not a chain, so `__Host-` does *not* imply `HttpOnly`:
-
-  | prefix | requires |
-  |---|---|
-  | `__Secure-` | `Secure`, on a secure origin |
-  | `__Http-` | `Secure` + `HttpOnly` |
-  | `__Host-` | `Secure` + `Path=/` + **no** `Domain` |
-  | `__Host-Http-` | `Secure` + `HttpOnly` + `Path=/` + no `Domain` |
-
-  Three things that will bite an implementation, all verified rather than
-  assumed:
-  - **Match longest-prefix-first.** Both engines order their prefix tables so
-    `__Host-Http-` is tested before `__Host-`, and both carry a comment saying
-    why. A naive `name.startswith('__Host-')` classifies `__Host-Http-sid` as
-    `__Host-` and then fails to require `HttpOnly` — a false negative that
-    looks like a pass.
-  - **Matching is case-INSENSITIVE**, which contradicts the obvious reading of
-    the spec. Chromium's `GetCookiePrefix()` uses
-    `base::CompareCase::INSENSITIVE_ASCII`; Firefox uses
-    `nsCaseInsensitiveCStringComparator` and explains the discrepancy in a
-    comment: RFC 6265bis §5.4 requires UAs to match case-insensitively even
-    though §4.1.3 describes the prefixes with "case-sensitive match" wording,
-    because that wording is about server-side semantics, not UA enforcement.
-    So `__SECURE-sid` must be held to the `__Secure-` rules. Firefox's comment
-    gives the reason: otherwise a server that compares names case-insensitively
-    would accept a miscapitalised prefix without the guarantees it implies.
-  - **A prefix hiding in the *value* of a nameless cookie is its own defect.**
-    Chromium's `HasHiddenPrefixName()` fires only when the name is empty
-    (`canonical_cookie.cc:397` and `:701`) and the cookie is then excluded
-    outright with `EXCLUDE_INVALID_PREFIX`. The case it stops is
-    `Set-Cookie: =__Host-sid=x`, which something downstream re-parses as a
-    `__Host-sid` cookie that never met the rules. Note this one matches the
-    prefix case-insensitively too, and after trimming leading SP/HTAB.
-
-  BCD is still the source for *which engine and which version*, in
-  `http/headers/Set-Cookie.json`: `host_secure_prefixes` is Chrome 49 /
-  Firefox 50 / Safari 13, so violating those two is a real defect everywhere;
-  `http_host-http_prefixes` is Chrome 140 / Firefox 143 / Safari `false`
-  (Firefox 142 shipped it briefly as `__HostHttp-`). **Look `__Http-` up there
-  before rating it** — it is in both engines' source but its BCD versions have
-  not been checked here, and a prefix Safari ignores cannot be rated the same
-  way as one it enforces. `Partitioned` (CHIPS) is Chrome 114 / Firefox 141 /
-  Safari 26.2 and is *not* a security defect either way.
-
-  **Where the specs are, and it is two drafts, not one.** No published RFC
-  carries these rules — `rfc6265.txt` does not contain `__Secure-` anywhere and
-  the RFC index lists no HTTP cookie RFC after 6265, so `documentation/`
-  `rfc-library` cannot answer this and is not at fault for it. Verified against
-  the draft text 2026-08-17:
-  - `__Secure-` and `__Host-` are `draft-ietf-httpbis-rfc6265bis` §4.1.3.1 and
-    §4.1.3.2. Current revision is **-22** (2025-12-01); the URL in Chromium's
-    `net/cookies/cookie_constants.h:391` cites **-13**, so treat any section
-    number copied out of browser source as needing a re-check.
-  - `__Http-` and `__Host-Http-` are **not in 6265bis at all** — zero
-    occurrences in -22, whose §4.1.3 has only the two subsections. They are
-    `draft-ietf-httpbis-layered-cookies` §4.1.3.3 and §4.1.3.4, currently
-    **-02** (2026-05-22). Firefox's comments attribute all four to
-    "RFC 6265bis §4.1.3", which is loose; do not copy that attribution.
-  - The case-insensitivity requirement is normative and lives in 6265bis
-    **§5.4**: "UAs MUST match the prefix string case-insensitively", explicitly
-    differing from the servers' §4.1.3 framing. Both engines apply it to all
-    four prefixes.
-  - **Cookie names themselves stay case-sensitive** (§5.4's own example):
-    `__Secure-foo` and `__secure-foo` are two distinct cookies that both have to
-    satisfy the `__Secure-` rules. That matters for keying — the cookie name in
-    `data` is a case-sensitive identifier even though the prefix test is not.
-
-  Neither draft is in `rfc-library`'s tracked tree; if they are on disk they are
-  under its `mirror/`, which the human maintains — do not fetch them. And WebKit
-  is no help here — its only prefix code is the curl backend.
-
-  **Both drafts are readable on disk after all, in `w3c/webref`** (found
-  2026-08-17; this paragraph used to end "work from the browser sources and say
-  the draft was not available"). Reffy crawls them, so
-  `ed/algorithms/rfc6265bis.json` and `ed/algorithms/layered-cookies.json` carry
-  the numbered steps verbatim, with `ed/headings/` and `ed/ids/` beside them.
-  What that settled, and what it did not:
-  - The section numbers above are **confirmed independently**: 6265bis §4.1.3
-    has exactly the two subsections, layered-cookies has §4.1.3.3 `__Http-` and
-    §4.1.3.4 `__Host-Http-`, and 6265bis §5.4 is titled "Cookie Name Prefixes".
-  - layered-cookies' *Store a Cookie* has all four prefixes at steps 13–16 and
-    the hidden-prefix-in-value rule at step 17, every one of them matching on
-    the name "byte-lowercased", with an inline note giving the same reason
-    Firefox's comment does — "to protect servers that process these values in a
-    case-insensitive manner".
-  - **The spec's structure is four independent guard clauses, not the browsers'
-    longest-prefix-first table.** `__Host-Http-sid` trips step 14 (starts with
-    `__host-`) *and* step 16, so the conjunction falls out of both firing. The
-    longest-prefix-first warning above is about implementations that match once
-    against a prefix table, and it still stands — it is just not what the draft
-    says.
-  - **Not everything is extractable.** These are plain RFC HTML with no Bikeshed
-    markup, so there are no `dfns/` files for either: "Host-prefix compatible"
-    and "Http-prefix compatible" are defined in §4.1.3 prose that webref does
-    not carry, and only their anchors show up in `ids/`. Read them from
-    `netwerk/cookie/CookiePrefixes.cpp`, which is the plan anyway.
-  - **Revision drift.** Reffy crawls the editor's copy at `httpwg.org/`
-    `http-extensions/`, not a numbered revision, so the extract can be ahead of
-    the -22 / -02 cited above. It is the current text, not a pinned one.
-- **The cache/cookie cross-header quirk — land it *with* the cookie parser, not
-  before.** RFC 9111 §7.3: "the Set-Cookie response header field does not inhibit
-  caching; a cacheable response with a Set-Cookie header field can be (and often
-  is) used to satisfy subsequent requests to caches." So `Cache-Control: public`
-  or `s-maxage` beside a `Set-Cookie` lets a shared cache hand one visitor's
-  cookie to the next. Tempting to write as a two-header rule today — don't. **No
-  header says a cookie is a session cookie.** On a `lang=en` this is not a
+- **The cache/cookie cross-header quirk — the cookie-parser blocker is gone;
+  what remains is the `caching` table's own contract.** RFC 9111 §7.3: "the
+  Set-Cookie response header field does not inhibit caching; a cacheable
+  response with a Set-Cookie header field can be (and often is) used to
+  satisfy subsequent requests to caches." So `Cache-Control: public` or
+  `s-maxage` beside a `Set-Cookie` lets a shared cache hand one visitor's
+  cookie to the next. Tempting to write as a two-header rule today — don't.
+  **No header says a cookie is a session cookie.** On a `lang=en` this is not a
   finding at all, and shipping it standalone means guessing. `HttpOnly`,
-  `SameSite`, and the `__Host-` / `__Secure-` prefixes are the signals that make
-  it worth reporting, and they only exist once the cookie parser does.
+  `SameSite`, and the `__Host-` / `__Secure-` prefixes are the signals that
+  make it worth reporting, and `cookies.py` supplies every one of them now.
+  What still blocks this is the sibling item below: `inventory()`'s `caching`
+  table promises no judgement of cache-control values at all, so there is
+  nothing yet to test a session cookie's exposure against.
 - **`Pragma: no-cache` with nothing enforcing it** — same parcel, same reason: it
   is the other half of "does the analyzer judge cache values at all", and
   `inventory()`'s `caching` table currently promises it does not. One code,
@@ -1361,7 +1279,7 @@ sense `catalog.py` is:
 
 - `additional/insecure.txt` — **158 defect names over 93 distinct headers**,
   each written `Header: Defect` (`Access-Control-Allow-Origin: Unsafe Values`,
-  `Cache-Control: No Valid Directives`). This package has 102 codes over far
+  `Cache-Control: No Valid Directives`). This package has 118 codes over far
   fewer headers, so that file is a ready-made gap list. Read it for candidates,
   not as a specification, and rate anything taken from it by principle 3.
 - `additional/missing.txt` — the 14 headers humble reports as absent, against
@@ -1469,7 +1387,7 @@ Surveyed 2026-08-21. Its value here is mostly evidentiary:
 - `other/Cookie-SameSite-Disabled.bcheck`, `other/tokens/`
   `cookie-cached-on-disk.bcheck` and
   `other/corsCredentialedRequestsMisconfiguration.bcheck` are small independent
-  opinions for the parked cookie work and the CORS rulings.
+  opinions to diff the cookie analyser and the CORS rulings against.
 
 **`security/shcheck`** and **`security/shcheck-fork`** — this package's own
 provenance, now checkable instead of recalled. `security/shcheck` is santoru's
@@ -1609,8 +1527,9 @@ moment the question is per-directive or per-value.
   make. Two failure modes to avoid in one 15-line file. Note *why* the first one
   is a bug, because this was recorded wrongly here once: lowercasing the name is
   not itself the error — browsers match these prefixes case-insensitively (see
-  the parked `Set-Cookie` item) — the error is comparing the lowered name
-  against a mixed-case literal, which can never match. Lower both sides.
+  `cookies.py`'s `strip_prefix()`, and `netwerk/cookie/CookiePrefixes.cpp`
+  behind it) — the error is comparing the lowered name against a mixed-case
+  literal, which can never match. Lower both sides.
   `burp/burp-samesite-reporter` is 326 lines of Java that
   classifies each cookie as `SameSite` missing / `None` / other and carries its
   reasoning in the issue prose.
@@ -1833,21 +1752,21 @@ Only the negatives that would otherwise look promising are kept:
 
 ## Status
 
-**Analyser:** 102 codes (39 error / 26 warning / 37 note), each with a rating, a
-message template, a declared header and a consequence tuple — 61 codes carry at
-least one consequence slug, 41 carry `()`. Every rendered sentence is pinned by
+**Analyser:** 118 codes (48 error / 26 warning / 44 note), each with a rating, a
+message template, a declared header and a consequence tuple — 73 codes carry at
+least one consequence slug, 45 carry `()`. Every rendered sentence is pinned by
 a snapshot. `CODE_HEADER` closes the parked code-to-header table:
 `test_the_declared_header_is_the_header_the_finding_carries` is what makes it
 stronger than the test it replaced, which could only prove the corpus was
 self-consistent — this one proves the package agrees with it.
-Eight consequence slugs live in `catalog.CONSEQUENCES`, a ten-entry
+Ten consequence slugs live in `catalog.CONSEQUENCES`, a ten-entry
 `CODE_TAXONOMY` overlays specific published ids onto a handful of codes, and
-`references.py` resolves all 40 headers a finding names, plus the security,
-deprecated and caching inventories — 30 of them via MDN, 3 via a permanent
+`references.py` resolves all 41 headers a finding names, plus the security,
+deprecated and caching inventories — 31 of them via MDN, 3 via a permanent
 spec URL, 7 via http.dev. That is deliberately narrower than "or an inventory
 can name": `information` alone names 91 headers and none of them resolve.
 
-**Layering:** four layers, lowest first — `core` (12 modules, `exchange.py`
+**Layering:** four layers, lowest first — `core` (13 modules, `cookies.py`
 newly among them), `adaptors` (one module, `adaptors.py`, converting a dozen
 live HTTP libraries' response objects into `Request`/`Response`), `formats`
 (recorded, not built — see **Layout**), `cli` (10 modules, `cli/outcome.py`
@@ -1859,16 +1778,17 @@ replacing `cli/exchange.py`). `__init__.py` exports the core only.
 **CLI:** `hst` ships the `scan` and `explain` verbs over 10 modules in `cli/`,
 standard library only. Reserved and documented but not implemented: the `read`
 verb and its file parsers, `--probe`, `--all-hops`, `--include-report-only`,
-`--unknown-headers`, `--retry`, scope exclusions, `-d/--data`, and the `sarif`
-and `ndjson` output formats — the last two are *named* in `writers.RESERVED` so
-a user gets "not implemented yet" rather than "invalid choice", which is the
-whole of their implementation. Consequences and taxonomy references took **no
+`--unknown-headers`, `--retry`, scope exclusions, `-d/--data`, `--ignore-cookie`,
+and the `sarif` and `ndjson` output formats — the last two are *named* in
+`writers.RESERVED` so a user gets "not implemented yet" rather than "invalid
+choice", which is the whole of their implementation. Consequences and taxonomy
+references took **no
 new flag**: identifiers are cheap enough to emit unconditionally, and parking
 the long-form descriptions to land with the SARIF writer's `fullDescription`
 field removed the only thing a verbosity switch would have gated — do not
 reserve one now.
 
-**Tests:** 602 passing across 366 test functions, 112 of them CLI. `ruff check`
+**Tests:** 871 passing across 508 test functions, 122 of them CLI. `ruff check`
 clean. No test touches the network, with one deliberate exception: the redirect-
 limit test binds a loopback `http.server` on an ephemeral port, because urllib's
 own redirect bookkeeping cannot be tested any other way.

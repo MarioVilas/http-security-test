@@ -238,7 +238,10 @@ definition of `error` and is true whatever the cookie holds.
 `data` carries the cookie name in every case, plus what the code needs:
 `cookie-prefix-violated` carries `{"prefix": "__Host-", "unmet":
 ["path", "domain"]}`, `cookie-oversized` carries `{"octets": 5142}`,
-`cookie-samesite-invalid` carries `{"value": "Strictt"}`.
+`cookie-samesite-invalid` carries `{"value": "Strictt"}` -- with no `value` key
+at all for the bare-flag spelling `SameSite` with no `=`, since there is
+nothing to quote back and a placeholder read as `SameSite=(none)`, telling the
+reader the response wrote something it did not.
 
 Four of the nine deserve their reasoning recorded:
 
@@ -321,8 +324,12 @@ guarantee its name advertises, which is the same defect from the other side.
 
 `cookie-unknown-attribute`, fixed `note`, consequences `()`. Fires once per
 attribute name the browsers do not recognise, carrying
-`{"cookie": name, "attribute": "Secrue", "suspected": "Secure"}`, with
-`suspected` absent when there is no near match.
+`{"cookie": name, "attribute": "secrue", "suspected": "Secure"}`, with
+`suspected` absent when there is no near match. The two keys are cased
+differently on purpose: `attribute` is the wire as the parser read it, which
+lowercases attribute names, while `suspected` names the attribute the author
+MEANT to write and is spelled canonically -- "a misspelling of httponly" reads
+wrong for a name nobody writes that way.
 
 **The recognised set is the browser union, not the spec's list.** Nine names,
 being Chromium's (`net/cookies/parsed_cookie.cc:62-70`) which is a superset of
@@ -377,6 +384,75 @@ The last three are not restatements of inventory fields once laddered. A
 parent domain where any subdomain takeover reaches it, is each a real finding;
 the same three facts on `lang=en` are not. That is exactly what the ladder is
 for, so they cost no mechanism beyond the three they share.
+
+**`cookie-persistent` excludes deletion, and does so without reading a
+clock.** `Max-Age` with `delta-seconds <= 0`, and an `Expires` at or before the
+response's own `Date`, both ask a browser to discard the cookie immediately,
+which is the opposite of what this code reports. A Django-style logout response
+-- `sessionid=""; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure;
+SameSite=Lax` -- is not "written to disk and outlives the session"; it is the
+mechanism by which the session ends, and because `sessionid` is also on the
+escalation list, the loudest instance of getting this wrong would have landed
+on the single most common *correct* case on the web.
+
+**The `Expires` cutoff is the response's own `Date`, falling back to
+1970-01-02 when the response sent none.** That is still clock-free in the sense
+the rule exists to protect: the verdict must not depend on when the tool
+happened to run, and `Date` is a fact carried *in the response*, so an archived
+report re-analysed a year later reaches the same verdict. The epoch alone was
+the first design and it misses the canonical ASP.NET Framework delete --
+`Expires = DateTime.Now.AddDays(-1)` with no `Max-Age`, an ordinary past date
+rather than 1970, read as persistence and then escalated because
+`asp.net_sessionid` is on the escalation list. PHP, Django, Rails, Express and
+Tomcat all write `Max-Age=0` or an epoch `Expires` and escaped that; ASP.NET
+does not. With no readable `Date` the residual stands and is a recorded limit.
+
+**`Max-Age` is `[ "-" ] 1*DIGIT` or it is not a `Max-Age` at all.** rfc6265bis
+algorithm [8] says an invalid `delta-seconds` means *"ignore the cookie-av"* --
+not a deletion, which is what an earlier draft of this section claimed. So
+`Max-Age=abc; Expires=<future>` falls through to the `Expires` and is
+persistent, exactly as it is in every browser, and `Max-Age=1_000` is an
+ignored av rather than 1000 seconds (`int()` is looser than the grammar:
+underscores, a leading `+`, other scripts' digits). When the `Max-Age` *is*
+valid it decides alone -- so `Max-Age=100; Expires=Thu, 01 Jan 1970` is
+persistent too. Both halves are verified rather than recalled: the parse rule
+is `w3c/webref`'s `ed/algorithms/rfc6265bis.json` algorithm [8] ("If the
+remainder of attribute-value contains a non-DIGIT character, ignore the
+cookie-av"), and the precedence is RFC 6265 4.1.2.2 verbatim -- "If a cookie
+has both the Max-Age and the Expires attribute, the Max-Age attribute has
+precedence and controls the expiration date of the cookie." Note the webref
+extract of the *storage model* is not usable for this: its `Store a Cookie`
+steps carry the `Max-Age` branch and lose the `Otherwise ... Expires` one, an
+extraction artefact of the kind CLAUDE.md warns about on the `main` branch.
+
+An `Expires` a browser cannot parse at all is excluded, because it sets no
+expiry and so is not persistence either; the same goes for a cookie whose only
+lifetime attribute was the ignored `Max-Age`, or for either attribute written
+as a bare flag with no value.
+
+**Two of the three are gated on tier 1's own verdict, and the claim is
+narrow: a tier-2 finding is suppressed where tier 1 has already made the same
+*attribute-level* claim moot.** Exactly two pairs are gated --
+`cookie-samesite-none` behind `cookie-samesite-none-insecure`, and
+`cookie-domain-broad` behind `cookie-domain-mismatch` -- and no more should be.
+Tier 1 and tier 2 findings about one cookie co-occur freely otherwise, and
+correctly: `cookie-control-character`, `cookie-oversized`,
+`cookie-prefix-violated` and `cookie-domain-mismatch` all sit beside tier-2
+`warning`s, because hardening advice *survives* fixing tier 1. An operator who
+repairs the prefix still has no `HttpOnly`, and gating that away would hide
+the second half of the work. `cookie-samesite-none` fires only when `Secure` is also
+present. Without it, `cookie-samesite-none-insecure` (tier 1) has already said
+Chrome and Firefox reject the cookie outright, and "sent on cross-site
+requests to this host by design" would contradict a finding on the same
+response saying the cookie is never sent at all -- Safari's part of the story
+is already carried in that tier-1 message. `cookie-domain-broad` fires only
+when the `Domain` actually matches the host. Without that,
+`cookie-domain-mismatch` (tier 1) has already said browsers reject the
+cookie, and "every subdomain of it receives the cookie" is meaningless for a
+cookie that was never set. Both reuse the same boolean tier 1 already
+computes rather than restating the logic. `cookie-persistent` has no tier-1
+counterpart to contradict, so it is gated differently -- excluded from firing
+on deletion, above, rather than gated on a sibling finding.
 
 `data` is `{"cookie": name, "evidence": [...]}`, where `evidence` is the list
 of signals that fired, empty at the floor. Deriving the level from `data` is
@@ -662,6 +738,19 @@ level is per finding.
 | `HttpOnly` already set | escalate | -- | escalate | `warning` |
 | name contains `csrf` / `xsrf` | escalate | **never** | escalate | `warning` |
 
+**The columns are the three absence codes, and the other three read only the
+middle two rows.** `cookie-samesite-none`, `cookie-persistent` and
+`cookie-domain-broad` take `session-name` and `prefix` -- the rows that infer
+whether the cookie matters -- and neither of the two rows that infer *intent*.
+A misspelling is excluded because nothing was misspelled, and `HttpOnly`
+already set is excluded because nothing was forgotten: the response asked for
+cross-site sending, an expiry, or a parent domain deliberately in each case.
+Leaving that row in inverted the ladder outright, so adding `HttpOnly` to a
+correctly hardened analytics cookie raised two unrelated notes to warnings and
+made the tool louder about hardening. `csrf` / `xsrf` does not reach them
+either: it is `Secure`'s and `SameSite`'s row for the *absence* codes, and
+these three are not absences.
+
 **A misspelling outranks every other signal, and is the only one that reaches
 `error`.** Every other row is an inference about whether the cookie matters. A
 misspelling is not an inference: the author wrote `Secrue`, so they intended
@@ -730,6 +819,23 @@ is what makes this a class rather than a carve-out, and it tells a later
 maintainer what the row is *for*. OIDC adds no name to any list here: it
 leaves the cookie name implementation-defined and permits localStorage
 instead, so there is nothing to match on -- only the reasoning generalises.
+
+**The exemption dominates every signal in the `HttpOnly` column, not only the
+name match that decides whether it applies.** A csrf/xsrf-named cookie that
+also carries a `__Secure-`/`__Host-`/`__Http-` prefix, or happens to match a
+session-name pattern, must **never** be escalated for `HttpOnly` on the
+strength of either: `prefix` and `session-name` only *infer* that a cookie
+matters, and OWASP's own worked example for the exempted case is written with
+exactly that shape --
+`Set-Cookie: __Host-token=RANDOM; path=/; Secure`
+(`Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.md:494-514`) -- paired
+with the same cheat sheet's statement that the cookie is deliberately not
+`HttpOnly` (`:114`, `:605`). Letting a *hardened* name reintroduce the
+escalation the exemption exists to prevent would be principle 4 in new
+clothes: the correctly configured, spec-recommended form penalised while the
+plain, unprefixed form is not. A misspelling of `HttpOnly` still escalates
+regardless of any of this, because that establishes intent rather than
+inferring importance -- see "A misspelling outranks every other signal" above.
 
 A prefix does not escalate the attribute it names: `__Secure-sid` without
 `Secure` is not a hardening gap but `cookie-prefix-violated`, tier 1.
@@ -803,7 +909,7 @@ have to reach for a Class-level id.
 ```python
 "session-theft": Consequence(
     "Session token theft",
-    ("CWE-1004", "CAPEC-31"),
+    ("CWE-1004",),
     "An attacker could obtain the cookie carrying this session and act as the "
     "user without their credentials. Whether the cookie carries a session is "
     "not determined here.",
@@ -824,7 +930,15 @@ the test a new slug has to pass -- `mitm` is the network path only, and
 
 CAPEC ids are chosen by cross-reference to the CWE already picked, not by name
 match, per the rule CLAUDE.md records after keyword matching went wrong three
-times in a dozen.
+times in a dozen. That held for `csrf`: CAPEC-62 cross-references CWE-352 in
+CAPEC 2.1, so the pairing survives the check it was chosen by. It did not hold
+for `session-theft` as first drafted -- CAPEC-31 was picked by name match
+("Session Theft" reads like the code) and turned out to cross-reference
+CWE-113/20/302/311/315/384/472/539/565/602/642, never CWE-1004, and no pattern
+in CAPEC 2.1 cross-references CWE-1004 at all. `session-theft` therefore
+carries `("CWE-1004",)` alone, the same single-id shape `data-disclosure`
+already has, rather than a CAPEC that does not cross-reference the CWE it
+would ride alongside.
 
 Assignments:
 

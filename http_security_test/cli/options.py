@@ -158,6 +158,10 @@ def _add_scan(verbs):
         action="store_true",
         help="include the base64 raw blobs (CARRIES Set-Cookie / Authorization)",
     )
+    output.add_argument(
+        "--ignore-cookie", metavar="NAME", action="append", default=[],
+        help="not implemented yet: suppress hardening findings for a cookie name",
+    )
 
     parser.set_defaults(run=commands.do_scan)
     return parser

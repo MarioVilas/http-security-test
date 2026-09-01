@@ -23,6 +23,7 @@ import sys
 from .. import (
     CODE_HEADER,
     CONSEQUENCES,
+    ESCALATABLE,
     FINDING_SEVERITY,
     MESSAGES,
     consequences,
@@ -44,7 +45,12 @@ def do_explain(args):
         if code not in FINDING_SEVERITY:
             continue
         header = CODE_HEADER[code]
-        print("%-34s %-8s %s" % (code, FINDING_SEVERITY[code], header or "(response)"))
+        level = FINDING_SEVERITY[code]
+        if code in ESCALATABLE:
+            level += "*"
+        print("%-34s %-9s %s" % (code, level, header or "(response)"))
+        if code in ESCALATABLE:
+            print("(* a floor: this level may escalate on evidence in the finding)")
         print(MESSAGES[code])
         slugs = consequences(code)
         if slugs:
@@ -137,6 +143,10 @@ def do_scan(args, source=None):
         outputs = _outputs(args)
     except writers.UsageError as error:
         print("error: %s" % error, file=sys.stderr)
+        return 2
+
+    if args.ignore_cookie:
+        print("error: --ignore-cookie is not implemented yet", file=sys.stderr)
         return 2
 
     targets = _targets(args.url)

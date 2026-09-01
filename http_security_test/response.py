@@ -27,6 +27,7 @@ moot. The headers that belong to no family are judged here too.
 import json
 import re
 
+from . import cookies
 from .csp import _analyze_csp, _analyze_csp_all, parse_csp
 from .exchange import host as _host
 from .exchange import scheme as _scheme
@@ -746,10 +747,19 @@ def _is_loopback(host):
     definition follows the potentially-trustworthy rule: localhost and anything
     under it, the IPv6 loopback, and the whole of 127.0.0.0/8 rather than just
     127.0.0.1.
+
+    Both spellings of the IPv6 loopback are accepted, and that is not
+    belt-and-braces: the two callers disagree about brackets. `_delivers()`
+    re-attaches them by hand after taking the port off an authority, while
+    `_reporting_endpoints_apply()` and the cookie caller in `analyze()` pass
+    `exchange.host()`, which is `urlsplit().hostname` and has the brackets
+    stripped. Testing only the bracketed form made the second kind of caller
+    silently answer False on `http://[::1]/`, which cost a correct cookie two
+    false `error` findings.
     """
     if host == "localhost" or host.endswith(".localhost"):
         return True
-    if host == "[::1]":
+    if host in ("[::1]", "::1"):
         return True
     octets = host.split(".")
     return len(octets) == 4 and octets[0] == "127" and all(o.isdigit() for o in octets)
@@ -1184,6 +1194,13 @@ def analyze(exchange):
     findings.extend(_analyze_report_only(present))
     findings.extend(_analyze_duplicates(present))
     findings.extend(_analyze_preload(present, host))
+    # Loopback counts as trustworthy: both engines carve it out, so testing
+    # the scheme alone would fire on every developer running against
+    # http://localhost. `secure` is None when the scheme was unreadable, and
+    # unknown is not plaintext -- treat it as trustworthy so nothing is
+    # asserted on input nobody supplied.
+    trustworthy = secure is not False or bool(host and _is_loopback(host))
+    findings.extend(cookies.analyze_cookies(present, trustworthy, host))
     # A repeated header can raise the same defect twice, and a defect is the pair
     # of a header and what is wrong with it: the second occurrence adds nothing.
     # Two *different* headers sharing a code stay, because they are two findings.
@@ -1195,7 +1212,7 @@ def analyze(exchange):
 def inventory(exchange):
     """What the response carries, before anything is judged about it.
 
-    Five tables, and the split between them is the point. `security` and
+    Six tables, and the split between them is the point. `security` and
     `missing` are two halves of one question -- with four exceptions, all
     inventoried when present and never reported absent because their absence is
     the ordinary state of the web rather than a gap: REPORTING_HEADERS,
@@ -1207,13 +1224,20 @@ def inventory(exchange):
     never analysed at all -- only a human can say whether a particular `Server`
     banner is a leak.
 
+    `cookies` is the sixth and the only one that is a list of parsed objects
+    rather than a header-name mapping. `Set-Cookie` may legally repeat and each
+    value is an unrelated cookie, so a mapping keyed by name would drop one of
+    two cookies sharing a name. It deliberately does NOT also appear under
+    `security`: the parsed rows carry `raw` already, and the same content in
+    two places is what the `references` design rejected.
+
     **`Content-Type` is deliberately in none of them**, and it is the only
     header a finding can name that no table carries. It is analysed, for the
     charset parameter alone, so `information` and `caching` cannot take it --
     both mean "never analysed". And it is not a security header: OWASP's
     250 000-domain corpus tracks 17 names and `content-type` is not among them.
-    A sixth key for it was designed and deferred; see CLAUDE.md for the trigger
-    that would earn one.
+    A seventh inventory key for it was designed and deferred; see CLAUDE.md for
+    the trigger that would earn one.
 
     Nothing here is withheld because of what it contains, which is why there is
     no `secure` argument. A plaintext response is still missing HSTS and this
@@ -1234,4 +1258,5 @@ def inventory(exchange):
         "deprecated": _filter_headers(present, DEPRECATED_HEADERS),
         "information": _filter_headers(present, INFORMATION_HEADERS),
         "caching": _filter_headers(present, CACHE_HEADERS),
+        "cookies": cookies.cookie_inventory(present),
     }

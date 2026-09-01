@@ -30,7 +30,7 @@ numbers, lists and dicts. The shape is:
         "inventory": {
           "security": {name: value}, "missing": [name],
           "deprecated": {name: value}, "information": {name: value},
-          "caching": {name: value}
+          "caching": {name: value}, "cookies": [{...}]
         },
         "references": {"headers": [...], "taxonomy": [...]},
         "raw": "<base64>",
@@ -50,11 +50,20 @@ There is no key for the URL. A response does not know where it came from, and a
 tool that fetched several wraps as many of these as it fetched -- which is a
 question about the run, not about any one response.
 
-`level` is derived from `code` and could be looked up by the consumer, but it is
-written out anyway: the common case is a reader who wants to sort by severity
-without also carrying the table. `data` is the machine-readable half of a
-finding and is always present, empty dict included, so a consumer never has to
-test for the key. `message` is the human half and can be left out entirely.
+`level` is the finding's own level where it carries one, and its code's default
+otherwise -- `level_of()` is what resolves the two, and it is why the key is
+written out at all: the common case is a reader who wants to sort by severity
+without carrying the tables. Recomputing it as `severity(code)` was once
+equivalent and no longer is: a cookie finding laddered up by the evidence in
+its `data` carries an explicit level, and `FINDING_SEVERITY[code]` is only the
+floor it started from, so a consumer that recomputes silently reads every
+escalated finding a rung or two too quiet. This is SARIF's own arrangement --
+`result.level` overriding `rule.defaultConfiguration.level` -- and the same
+argument applies: the result is what happened, the rule is only its default.
+
+`data` is the machine-readable half of a finding and is always present, empty
+dict included, so a consumer never has to test for the key. `message` is the
+human half and can be left out entirely.
 
 The `references` block is the reading list for this response, as identifiers
 rather than links: a header name and a CWE identifier both resolve to a stable
@@ -111,8 +120,8 @@ from .findings import (
     CODE_HEADER,
     _identifier_sort_key,
     consequences,
+    level_of,
     order_findings,
-    severity,
     taxonomy,
 )
 from .response import analyze, inventory
@@ -137,7 +146,7 @@ def finding_as_dict(finding, message=True):
     row = {
         "header": finding.header,
         "code": finding.code,
-        "level": severity(finding.code),
+        "level": level_of(finding),
         "data": dict(finding.data or {}),
         # Always present, [] included, so a consumer never tests for the key.
         # A hint about potential risk, never a claim the risk is reachable.

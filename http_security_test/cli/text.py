@@ -118,6 +118,29 @@ def _inventory_lines(report):
             for one in [value] if isinstance(value, str) else value:
                 lines.append("  %s: %s" % (name, one))
         lines.append("")
+    rows = inventory.get("cookies") or []
+    if rows:
+        lines.append("cookies:")
+        for row in rows:
+            flags = [k for k in ("secure", "httponly", "partitioned") if row[k]]
+            if row["samesite"]:
+                flags.append("SameSite=%s" % row["samesite"])
+            if row["domain"]:
+                flags.append("Domain=%s" % row["domain"])
+            # "no security attributes", not "no attributes": this list
+            # inspects five of them, so a cookie carrying only `Path` and
+            # `Expires` would otherwise be reported as carrying none -- and
+            # that is exactly the shape of the infrastructure cookies below,
+            # where the claim would also hide the persistence.
+            detail = "; ".join(flags) if flags else "no security attributes"
+            if not row["judged"]:
+                detail += "   (not judged: infrastructure cookie)"
+            # The same placeholder catalog.py gives a nameless cookie: an
+            # empty name is legal (rfc6265bis 5.2 step 3) and left alone it
+            # renders as 28 blanks where a name belongs.
+            name = row["name"] or "a nameless cookie"
+            lines.append("  %-28s %s" % (name, detail))
+        lines.append("")
     if inventory.get("missing"):
         lines.append("missing:")
         lines.extend("  %s" % name for name in inventory["missing"])

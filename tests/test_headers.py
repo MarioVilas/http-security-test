@@ -815,6 +815,23 @@ def test_inventories_never_judge_what_they_list():
     assert len(headers.inventory(_ex(noisy))["information"]) == len(headers.INFORMATION_HEADERS)
 
 
+def test_the_inventory_has_a_cookies_table():
+    present = {"Set-Cookie": ["sid=1; Secure", "lang=en"]}
+    table = headers.inventory(_ex(present))["cookies"]
+    assert [row["name"] for row in table] == ["sid", "lang"]
+    assert table[0]["secure"] is True
+
+
+def test_the_cookies_table_is_empty_when_the_response_sets_none():
+    assert headers.inventory(_ex({}))["cookies"] == []
+
+
+def test_the_cookies_table_keeps_both_of_a_repeated_name():
+    present = {"Set-Cookie": ["sid=1; Path=/a", "sid=2; Path=/b"]}
+    table = headers.inventory(_ex(present))["cookies"]
+    assert [row["path"] for row in table] == ["/a", "/b"]
+
+
 def test_the_header_tables_do_not_overlap():
     security = set(headers.SECURITY_HEADERS)
     assert not security & set(headers.DEPRECATED_HEADERS)
@@ -1040,6 +1057,36 @@ def _emitted():
         yield from headers.analyze(_ex(present))
     with mock.patch.object(hsts, "hstspreload", FakePreloadList()):
         yield from headers.analyze(_ex(PRELOAD_CLAIM, url="https://example.com/"))
+    for present, url in COOKIE_CASES:
+        yield from headers.analyze(_ex(present, url=url))
+
+
+# Cookie findings cannot go in ANALYZER_CASES: _analyze_header takes a value,
+# and cookie rules need the request scheme and host as well.
+COOKIE_CASES = [
+    ({"Set-Cookie": ["a=b; SameSite=None"]}, "https://example.com/"),
+    ({"Set-Cookie": ["a=b; Secure"]}, "http://example.com/"),
+    ({"Set-Cookie": ["__Secure-sid=x"]}, "https://example.com/"),
+    ({"Set-Cookie": ["=__Host-sid=x"]}, "https://example.com/"),
+    ({"Set-Cookie": ["a=b\x00c"]}, "https://example.com/"),
+    ({"Set-Cookie": ["a=" + "x" * 4096]}, "https://example.com/"),
+    ({"Set-Cookie": ["a=b; SameSite=Strictt; Secure"]}, "https://example.com/"),
+    # the bare-flag spelling of the same code: one sentence, no `value` key,
+    # so the snapshot pins both wordings rather than only the `=`-bearing one
+    ({"Set-Cookie": ["a=b; SameSite; Secure"]}, "https://example.com/"),
+    ({"Set-Cookie": ["a=b; Partitioned"]}, "https://example.com/"),
+    ({"Set-Cookie": ["a=b; Domain=evil.example"]}, "https://www.example.com/"),
+    ({"Set-Cookie": ["lang=en"]}, "https://example.com/"),
+    ({"Set-Cookie": ["x=y; SameSite=None; Secure"]}, "https://example.com/"),
+    ({"Set-Cookie": ["x=y; Max-Age=60; Secure"]}, "https://example.com/"),
+    ({"Set-Cookie": ["x=y; Domain=example.com; Secure"]}, "https://www.example.com/"),
+    ({"Set-Cookie": ["a=b; Secure; HttpOnly; SameSite=Lax; Version=1"]}, "https://example.com/"),
+    ({"Set-Cookie": ["a=b; HttpOnly; SameSite=Lax; Secrue"]}, "https://example.com/"),
+    # A textbook-correct cookie on the IPv6 loopback: silent, because a
+    # loopback origin is potentially trustworthy however it is spelled.
+    ({"Set-Cookie": ["__Secure-sid=abc; Secure; HttpOnly; SameSite=Lax"]},
+     "http://[::1]:8000/"),
+]
 
 
 def _every_code_headers_can_emit():
@@ -1077,6 +1124,8 @@ def _every_code_headers_can_emit():
         codes |= {
             f.code for f in headers.analyze(_ex(PRELOAD_CLAIM, url="https://example.com/"))
         }
+    for present, url in COOKIE_CASES:
+        codes |= {f.code for f in headers.analyze(_ex(present, url=url))}
     return codes
 
 
@@ -1094,7 +1143,7 @@ def test_no_severity_is_mapped_for_a_code_that_cannot_be_emitted():
 # report() is the whole analysis as plain data: a list of findings and the
 # inventories. Findings are a list rather than codes grouped under a severity,
 # because a code is no longer unique within a response -- duplicate-headers
-# names several headers today, and per-cookie findings will repeat within one.
+# names several headers today, and per-cookie findings repeat within one.
 
 
 def test_report_is_json_serialisable_with_no_encoder():
@@ -1166,6 +1215,7 @@ def test_the_report_carries_every_inventory():
         "deprecated",
         "information",
         "caching",
+        "cookies",
     }
 
 
@@ -1306,7 +1356,8 @@ def test_a_report_with_blobs_is_still_json_serialisable():
 # ---------------------------------------------------------------------------
 # The message catalog
 # ---------------------------------------------------------------------------
-# The analysers hold no prose: they emit (header, code, data) and catalog.py
+# The analysers hold no prose: they emit (header, code, data, level) and
+# catalog.py
 # turns that into a sentence. Three things can go wrong, and each is pinned
 # here, because none of them shows up as a failing analysis -- they show up as
 # a crash or a blank in whatever renders the findings.
@@ -1420,7 +1471,7 @@ def test_severity_values_match_the_documented_policy():
     # The completeness tests above check only which codes are rated. These
     # anchor what they are rated, so a flipped value cannot land silently.
     counts = collections.Counter(headers.FINDING_SEVERITY.values())
-    assert counts == {"error": 39, "warning": 26, "note": 37}
+    assert counts == {"error": 48, "warning": 26, "note": 44}
     # An explicitly-defaulted header is rated exactly as its absence is, so
     # neither spelling of the same posture reads better than the other
     assert (
@@ -1441,6 +1492,75 @@ def test_severity_values_match_the_documented_policy():
     # The code names the value, not its age: ALLOW-FROM is an error because no
     # browser honours it, which a -deprecated suffix would have understated.
     assert headers.FINDING_SEVERITY["xfo-allow-from"] == "error"
+
+
+def test_a_finding_without_a_level_uses_its_code_default():
+    finding = headers.Finding("Strict-Transport-Security", "hsts-missing")
+    assert headers.level_of(finding) == "error"
+
+
+def test_a_finding_can_carry_its_own_level():
+    finding = headers.Finding("Set-Cookie", "hsts-missing", {}, "note")
+    assert headers.level_of(finding) == "note"
+    # The table is untouched: the override is per finding, not per code.
+    assert headers.severity("hsts-missing") == "error"
+
+
+def test_identity_ignores_the_level():
+    # Two findings that differ only in level are the same finding. The level is
+    # always derived from `data`, so this can only happen by mistake.
+    a = headers.Finding("Set-Cookie", "hsts-missing", {"cookie": "sid"}, "note")
+    b = headers.Finding("Set-Cookie", "hsts-missing", {"cookie": "sid"}, "error")
+    assert headers.identity(a) == headers.identity(b)
+
+
+def test_every_escalatable_code_is_a_real_code():
+    assert headers.ESCALATABLE <= set(headers.FINDING_SEVERITY)
+
+
+def test_only_escalatable_codes_ever_carry_an_explicit_level():
+    # The converse of the check above, and the one that makes `hst explain`
+    # honest when it calls a code's FINDING_SEVERITY entry a floor: a finding
+    # with an explicit level is claiming its code can be escalated, so a code
+    # outside ESCALATABLE had better never carry one. Walks the raw Finding
+    # (not level_of()'s resolved value), because a code that always defaults
+    # to None would pass this vacuously if it were checked after resolution.
+    for present, url in COOKIE_CASES:
+        for finding in headers.analyze(_ex(present, url=url)):
+            assert finding.level is None or finding.code in headers.ESCALATABLE
+
+
+def test_a_nameless_cookie_gets_a_readable_subject_not_a_leading_space():
+    # rfc6265bis 5.2 step 3 makes an empty name a legal cookie -- see
+    # cookies.parse_set_cookie -- and every cookie template opens with
+    # "{cookie} ...". Left unhandled, `data["cookie"] == ""` renders a
+    # leading space where a subject belongs (Task 6 review, IMPORTANT 5).
+    finding = headers.Finding("Set-Cookie", "cookie-no-httponly",
+                              {"cookie": "", "evidence": []})
+    rendered = headers.describe(finding)
+    assert not rendered.startswith(" ")
+    assert rendered.startswith("a nameless cookie")
+
+
+def test_a_nameless_cookies_unknown_attribute_still_composes_a_subject():
+    # cookie-unknown-attribute's template also opens with {cookie}, and its
+    # display function composes with _cookie_subject rather than reading
+    # data["cookie"] directly -- this pins that composition rather than
+    # leaving it incidental (Task 7).
+    finding = headers.Finding("Set-Cookie", "cookie-unknown-attribute",
+                              {"cookie": "", "attribute": "version"})
+    rendered = headers.describe(finding)
+    assert not rendered.startswith(" ")
+    assert rendered.startswith("a nameless cookie sets the attribute version")
+
+
+def test_every_level_a_finding_carries_is_a_real_severity():
+    # A typo'd level would sort wrong and render wrong, and nothing else would
+    # notice: order_findings does SEVERITIES.index(...), which raises, and
+    # --min-level compares an index. This is the guard for the whole corpus.
+    for present, url in COOKIE_CASES:
+        for finding in headers.analyze(_ex(present, url=url)):
+            assert headers.level_of(finding) in headers.SEVERITIES
 
 
 def test_order_findings_puts_the_worst_first():
@@ -2297,7 +2417,7 @@ def test_content_type_is_deliberately_in_no_inventory():
     It is analysed -- for the charset parameter alone -- so `information` and
     `caching` cannot take it, both meaning "never analysed". And it is not a
     security header: OWASP's 250 000-domain corpus tracks 17 names and
-    `content-type` is not among them. A sixth inventory key was designed and
+    `content-type` is not among them. A seventh inventory key was designed and
     deferred until a second such header exists; CLAUDE.md carries the trigger.
     """
     inventory = headers.inventory(_ex({"content-type": "text/html"}))
@@ -2362,6 +2482,18 @@ def test_a_bracketed_ipv6_loopback_endpoint_is_left_alone():
     # the port comes off after the closing bracket, not at the first colon
     present = dict(CSP_REPORTS_NOWHERE, **{"reporting-endpoints": 'csp-ep="http://[::1]:9000/r"'})
     assert group_codes(present) == []
+
+
+def test_the_ipv6_loopback_is_trustworthy_without_its_brackets():
+    # exchange.host() is urlsplit().hostname, which strips the brackets, so
+    # `_is_loopback` has to answer for both spellings: the test above passes
+    # the bracketed form _delivers() rebuilds by hand, and this one passes the
+    # bracketless form every other caller has. Testing only `[::1]` made a
+    # correct cookie on http://[::1]:8000/ raise two false errors -- Secure
+    # over "plaintext" and a violated __Secure- prefix (final review, C1).
+    present = {"Set-Cookie": ["__Secure-sid=abc; Secure; HttpOnly; SameSite=Lax"]}
+    codes = {f.code for f in headers.analyze(_ex(present, url="http://[::1]:8000/"))}
+    assert not [code for code in codes if code.startswith("cookie-")]
 
 
 def test_a_relative_endpoint_is_left_alone():

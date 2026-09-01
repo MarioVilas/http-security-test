@@ -19,9 +19,10 @@
 """What a finding says in English, and nothing else.
 
 Every sentence the package can produce lives here. The analysers do not import
-this module and hold no prose of their own: they emit `(header, code, data)`,
-where `data` carries the values that made the finding true, and the rendering
-happens here or in a consumer that would rather write its own.
+this module and hold no prose of their own: they emit
+`(header, code, data, level)`, where `data` carries the values that made the
+finding true, and the rendering happens here or in a consumer that would rather
+write its own.
 
 That split follows SARIF, which the ratings already follow: a template belongs
 to the rule (`messageStrings`) and the values belong to the result
@@ -447,6 +448,74 @@ MESSAGES = {
         "present but has an unrecognised value ({value}), expected '0', '1' or "
         "'1; mode=block'"
     ),
+    # -- Set-Cookie -----------------------------------------------------------
+    "cookie-control-character": (
+        "{cookie} contains a control character, so browsers discard the whole "
+        "Set-Cookie header and the cookie is never set"
+    ),
+    "cookie-oversized": (
+        "{cookie} has a name and value totalling {octets} octets, over the "
+        "4096-octet limit, so browsers discard it entirely"
+    ),
+    "cookie-samesite-invalid": (
+        "{cookie} {setting}, which no browser recognises, so it "
+        "falls back to the default -- Lax in Chrome, and no cross-site "
+        "restriction at all in Firefox and Safari"
+    ),
+    "cookie-samesite-none-insecure": (
+        "{cookie} sets SameSite=None without Secure, so Chrome and Firefox "
+        "reject the cookie outright and Safari sends it cross-site in "
+        "cleartext"
+    ),
+    "cookie-secure-over-plaintext": (
+        "{cookie} is marked Secure on a response that did not arrive over a "
+        "trustworthy origin, so the cookie is not stored at all"
+    ),
+    "cookie-partitioned-insecure": (
+        "{cookie} sets Partitioned without Secure, so the partitioning "
+        "attribute is rejected"
+    ),
+    "cookie-prefix-violated": (
+        "{cookie} carries the {prefix} prefix but does not meet its "
+        "requirements ({unmet}), so browsers reject the cookie"
+    ),
+    "cookie-hidden-prefix": (
+        "a nameless cookie carries a value beginning {prefix}, which browsers "
+        "reject and anything re-parsing it would read as a prefixed cookie "
+        "that never met the prefix rules"
+    ),
+    "cookie-domain-mismatch": (
+        "{cookie} sets Domain={domain}, which is not {host} nor a parent of "
+        "it, so browsers reject the cookie"
+    ),
+    "cookie-no-secure": (
+        "{cookie} has no Secure attribute, so the browser will send it over "
+        "plaintext HTTP to this host"
+    ),
+    "cookie-no-httponly": (
+        "{cookie} has no HttpOnly attribute, so scripts running in the page "
+        "can read it"
+    ),
+    "cookie-no-samesite": (
+        "{cookie} has no SameSite attribute; Chrome defaults it to Lax, while "
+        "Firefox and Safari send it on cross-site requests"
+    ),
+    "cookie-samesite-none": (
+        "{cookie} sets SameSite=None, so it is sent on cross-site requests to "
+        "this host by design"
+    ),
+    "cookie-persistent": (
+        "{cookie} sets an expiry, so it is written to disk and outlives the "
+        "browser session"
+    ),
+    "cookie-domain-broad": (
+        "{cookie} sets Domain={domain}, so every subdomain of it receives the "
+        "cookie"
+    ),
+    "cookie-unknown-attribute": (
+        "{cookie} sets the attribute {attribute}, which no browser "
+        "recognises{detail}"
+    ),
 }
 
 
@@ -501,9 +570,67 @@ def _ip_sources(data):
     return {"sources": " ".join(data["sources"])}
 
 
+def _cookie_subject(data):
+    """`data`, with an empty {cookie} given a readable placeholder.
+
+    An empty name is a legal cookie -- rfc6265bis 5.2 step 3, see the
+    docstring of `cookies.parse_set_cookie` -- and every cookie template's
+    sentence opens with the cookie naming itself as the subject. Left alone, a
+    nameless cookie renders a leading space where a subject belongs.
+    `cookie-hidden-prefix` never hits this because its own template has no
+    {cookie} field at all ("a nameless cookie carries a value beginning...");
+    every other cookie code does, tier 1 and tier 2 alike, so all of them
+    route through here rather than through the default
+    `{k: _joined(v) ...}` path `describe()` otherwise uses.
+    """
+    fields = {k: _joined(v) for k, v in data.items()}
+    if fields.get("cookie") == "":
+        fields["cookie"] = "a nameless cookie"
+    return fields
+
+
+def _samesite_invalid(data):
+    """The SameSite clause, which reads differently for the two spellings.
+
+    `Set-Cookie: a=b; SameSite` carries no value at all, so `data` has no
+    `value` key and there is nothing to quote back; a placeholder rendered
+    "sets SameSite=(none)", telling the reader the response wrote something it
+    did not. The defect is identical either way -- rfc6265bis algorithm [11]
+    sets enforcement to Default for both -- so it stays one code and the
+    clause is what varies.
+    """
+    fields = _cookie_subject(data)
+    value = data.get("value")
+    fields["setting"] = (
+        "sets SameSite=%s" % value if value is not None
+        else "sets SameSite as a flag with no value"
+    )
+    return fields
+
+
+def _unknown_attribute(data):
+    # Composes with _cookie_subject rather than reading data["cookie"]
+    # directly: _DISPLAY maps a code to exactly ONE function, and this code's
+    # template also opens with {cookie} as its subject. Setting the key here
+    # would reintroduce the nameless-cookie leading space that
+    # _cookie_subject exists to prevent.
+    fields = _cookie_subject(data)
+    suspected = data.get("suspected")
+    fields["attribute"] = data["attribute"]
+    fields["detail"] = (
+        " and may be a misspelling of %s" % suspected if suspected else ""
+    )
+    return fields
+
+
 # The codes whose sentence cannot be written as a template over `data` alone.
 # Everything else is a plain format string; keep this list short, because each
-# entry is a piece of prose that a translator has to find.
+# entry is a piece of prose that a translator has to find. Thirteen of the
+# fifteen cookie entries share one function rather than being thirteen
+# fragments of prose: nothing there is code-specific, so it is one shared
+# substitution, not a "handful" of one-off ones. The other two compose with it
+# -- `_unknown_attribute` and `_samesite_invalid` each add one clause of their
+# own on top of the shared subject.
 _DISPLAY = {
     "csd-unknown-type": _quoted_types,
     "csp-plain-scheme": _scheme_pairs,
@@ -511,6 +638,21 @@ _DISPLAY = {
     "hsts-preload-ineffective": _hsts_unmet,
     "ip-no-blocked-destinations": _ip_detail,
     "ip-sources-without-inline": _ip_sources,
+    "cookie-control-character": _cookie_subject,
+    "cookie-domain-broad": _cookie_subject,
+    "cookie-domain-mismatch": _cookie_subject,
+    "cookie-no-httponly": _cookie_subject,
+    "cookie-no-samesite": _cookie_subject,
+    "cookie-no-secure": _cookie_subject,
+    "cookie-oversized": _cookie_subject,
+    "cookie-partitioned-insecure": _cookie_subject,
+    "cookie-persistent": _cookie_subject,
+    "cookie-prefix-violated": _cookie_subject,
+    "cookie-samesite-invalid": _samesite_invalid,
+    "cookie-samesite-none": _cookie_subject,
+    "cookie-samesite-none-insecure": _cookie_subject,
+    "cookie-secure-over-plaintext": _cookie_subject,
+    "cookie-unknown-attribute": _unknown_attribute,
 }
 
 
@@ -610,5 +752,28 @@ CONSEQUENCES = {
         "A powerful capability such as the camera, microphone or location "
         "could be reachable by the page or by a third party it embeds. "
         "Whether anything embedded would use it is not determined here.",
+    ),
+    "session-theft": Consequence(
+        "Session token theft",
+        # CAPEC-31 was the first choice by name match and is wrong by this
+        # project's own rule: CAPEC 2.1 cross-references CAPEC-31 against
+        # CWE-113/20/302/311/315/384/472/539/565/602/642, never CWE-1004, and
+        # no pattern in CAPEC 2.1 cross-references CWE-1004 at all. CWE-1004
+        # "Sensitive Cookie Without 'HttpOnly' Flag" is exactly the weakness
+        # this slug names and is kept alone rather than traded for a CAPEC
+        # that does not cross-reference it -- the same single-id shape as
+        # `data-disclosure`, which is `("CWE-200",)`.
+        ("CWE-1004",),
+        "An attacker could obtain the cookie carrying this session and act as "
+        "the user without their credentials. Whether the cookie carries a "
+        "session is not determined here.",
+    ),
+    "csrf": Consequence(
+        "Cross-site request forgery",
+        ("CWE-352", "CAPEC-62"),
+        "Another site could cause the browser to make an authenticated "
+        "request to this origin using the user's own cookies. Whether the "
+        "application has a state-changing endpoint that would accept one is "
+        "not determined here.",
     ),
 }

@@ -57,6 +57,7 @@ _MDN = (
     "Referrer-Policy",
     "Report-To",
     "Reporting-Endpoints",
+    "Set-Cookie",
     "Strict-Transport-Security",
     "X-Content-Type-Options",
     "X-DNS-Prefetch-Control",

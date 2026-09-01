@@ -27,11 +27,15 @@ to a particular site is not something this package can know.
 import collections
 import json
 
-# A finding is a header, a stable code, and the values that made it true. It
-# carries no prose: the sentence lives in catalog.py, keyed by the code, and is
-# rendered from `data` on demand. `data` defaults to None for the many findings
-# that have nothing to add beyond the code.
-Finding = collections.namedtuple("Finding", "header code data", defaults=(None,))
+# A finding is a header, a stable code, the values that made it true, and
+# optionally its own level. `level=None` means "use FINDING_SEVERITY", which is
+# the code's default and not its only possible rating: one defect can be worth
+# more on one cookie than on another, and that is a rating rather than a
+# different fact. This is SARIF's shape -- `result.level` overrides
+# `rule.defaultConfiguration.level` -- and the report schema was already on
+# this side of the line, denormalising `level` onto every finding.
+Finding = collections.namedtuple("Finding", "header code data level",
+                                defaults=(None, None))
 
 
 def identity(finding):
@@ -42,6 +46,9 @@ def identity(finding):
     one -- so the data is part of it. Serialised rather than hashed because the
     values are lists and dicts, and sorted so that key order cannot make one
     finding look like two.
+
+    The level is deliberately not part of it. A level is always derived from
+    `data`, so two findings with the same identity cannot disagree about it.
     """
     return (
         finding.header,
@@ -67,6 +74,15 @@ FINDING_SEVERITY = {
     "acao-multiple-origins": "error",
     "acao-null": "error",
     "coep-invalid": "error",
+    "cookie-control-character": "error",
+    "cookie-domain-mismatch": "error",
+    "cookie-hidden-prefix": "error",
+    "cookie-oversized": "error",
+    "cookie-partitioned-insecure": "error",
+    "cookie-prefix-violated": "error",
+    "cookie-samesite-invalid": "error",
+    "cookie-samesite-none-insecure": "error",
+    "cookie-secure-over-plaintext": "error",
     "corp-invalid": "error",
     "csd-unquoted": "error",
     "csp-invalid-keyword": "error",
@@ -169,6 +185,13 @@ FINDING_SEVERITY = {
     "xpcdp-deprecated": "note",
     "xpcdp-policy-file": "note",
     "xxp-deprecated": "note",
+    "cookie-domain-broad": "note",
+    "cookie-no-httponly": "note",
+    "cookie-no-samesite": "note",
+    "cookie-no-secure": "note",
+    "cookie-persistent": "note",
+    "cookie-samesite-none": "note",
+    "cookie-unknown-attribute": "note",
 }
 
 
@@ -284,6 +307,23 @@ CODE_HEADER = {
     "re-endpoint-undeliverable": "Reporting-Endpoints",
     "re-ineffective": "Reporting-Endpoints",
     "re-invalid": "Reporting-Endpoints",
+    # -- Set-Cookie
+    "cookie-control-character": "Set-Cookie",
+    "cookie-domain-broad": "Set-Cookie",
+    "cookie-domain-mismatch": "Set-Cookie",
+    "cookie-hidden-prefix": "Set-Cookie",
+    "cookie-no-httponly": "Set-Cookie",
+    "cookie-no-samesite": "Set-Cookie",
+    "cookie-no-secure": "Set-Cookie",
+    "cookie-oversized": "Set-Cookie",
+    "cookie-partitioned-insecure": "Set-Cookie",
+    "cookie-persistent": "Set-Cookie",
+    "cookie-prefix-violated": "Set-Cookie",
+    "cookie-samesite-invalid": "Set-Cookie",
+    "cookie-samesite-none": "Set-Cookie",
+    "cookie-samesite-none-insecure": "Set-Cookie",
+    "cookie-secure-over-plaintext": "Set-Cookie",
+    "cookie-unknown-attribute": "Set-Cookie",
     # -- Strict-Transport-Security
     "hsts-malformed": "Strict-Transport-Security",
     "hsts-max-age-short": "Strict-Transport-Security",
@@ -467,6 +507,28 @@ CODE_CONSEQUENCES = {
     # Ambiguity rather than a named risk: which value wins is client-specific,
     # so what it costs depends on which header repeated and cannot be said here.
     "duplicate-headers": (),
+    # -- Set-Cookie. The empty ones fail closed: a discarded cookie and a
+    # rejected Partitioned attribute both leave a feature absent rather than
+    # anything over-shared.
+    "cookie-control-character": (),
+    "cookie-domain-broad": ("session-theft",),
+    "cookie-domain-mismatch": ("session-theft",),
+    "cookie-hidden-prefix": ("session-theft",),
+    "cookie-no-httponly": ("session-theft",),
+    "cookie-no-samesite": ("csrf",),
+    "cookie-no-secure": ("mitm", "session-theft"),
+    "cookie-oversized": (),
+    "cookie-partitioned-insecure": (),
+    "cookie-persistent": ("session-theft", "cache-exposure"),
+    "cookie-prefix-violated": ("session-theft",),
+    "cookie-samesite-invalid": ("csrf",),
+    "cookie-samesite-none": ("csrf",),
+    "cookie-samesite-none-insecure": ("csrf", "mitm"),
+    "cookie-secure-over-plaintext": ("mitm", "session-theft"),
+    # Empty because the note asserts no defect. Where a misspelling does cause
+    # one, the consequences are carried by the absence finding it escalates,
+    # which already holds exactly the right slugs.
+    "cookie-unknown-attribute": (),
 }
 
 
@@ -526,6 +588,27 @@ def severity(code):
     return FINDING_SEVERITY.get(code, "warning")
 
 
+# Codes whose level can be raised above their default by evidence in `data`.
+# `hst explain` reads this so it can say the level it prints is a floor.
+ESCALATABLE = frozenset([
+    "cookie-domain-broad",
+    "cookie-no-httponly",
+    "cookie-no-samesite",
+    "cookie-no-secure",
+    "cookie-persistent",
+    "cookie-samesite-none",
+])
+
+
+def level_of(finding):
+    """A finding's level: its own if it carries one, else its code's default.
+
+    `severity()` answers about a *code* and stays the public spelling of that
+    question. This answers about a *finding*, which is what a renderer wants.
+    """
+    return finding.level or severity(finding.code)
+
+
 def order_findings(findings):
     """Worst first, so a header's headline problem reads first."""
-    return sorted(findings, key=lambda f: SEVERITIES.index(severity(f.code)))
+    return sorted(findings, key=lambda f: SEVERITIES.index(level_of(f)))

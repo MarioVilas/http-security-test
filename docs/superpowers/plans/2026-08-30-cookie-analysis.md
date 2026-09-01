@@ -18,6 +18,19 @@
 - **No analyser imports `catalog.py`.** Analysers emit `(header, code, data)` and hold no prose. A test reads the syntax of every `Finding()` call to keep it that way.
 - **Every emittable code needs four table entries in the same task that makes it emittable**: `FINDING_SEVERITY`, `CODE_HEADER`, `CODE_CONSEQUENCES` (in `findings.py`) and `MESSAGES` (in `catalog.py`). Four bijection tests go red otherwise, so a task that adds a code and defers its tables leaves the suite failing.
 - **`tests/test_headers.py` has a hard severity census** in `test_severity_values_match_the_documented_policy`. Its current value is `{"error": 39, "warning": 26, "note": 37}`. Each code-adding task states the new value; update it in that task.
+- **Read every regenerated snapshot's diff against this task's workspace
+  snapshot, never against `HEAD`.** Nothing in this run is committed — the
+  human owns that — so `git diff` shows the *cumulative* change since before
+  Task 1 rather than this task's own, and by Task 6 that was 28 lines where
+  the step expected 6. The correct baseline is the snapshot taken before the
+  task began:
+  ```bash
+  SNAP=.superpowers/sdd/2026-08-30-cookie-analysis/snap-<N>
+  diff "$SNAP/tests/rendered_messages.txt" tests/rendered_messages.txt
+  diff "$SNAP/tests/cli_terminal_snapshot.txt" tests/cli_terminal_snapshot.txt
+  ```
+  The point of reading it at all is to confirm your task ADDED lines and
+  changed none, so a cumulative diff cannot answer the question.
 - **Run `ruff check` before every checkpoint. Do not run `ruff format`** — the human formats.
 - **Mutation-test every new guard.** Break it, confirm a test fails, restore from `$SCRATCH`. A test that passes both ways is worse than none.
 - Cookie names are **case-sensitive identifiers**; prefix and list *matching* is **case-insensitive**. Both, at once, everywhere.
@@ -552,10 +565,14 @@ def test_non_session_names_do_not_match(name):
     assert not cookies.is_session_name(name)
 
 
+# NOTE: `whostmgrsession` deliberately does NOT appear below. It is WHM's
+# session cookie and belongs to SESSION_NAMES, so it must ESCALATE, not be
+# suppressed. An earlier draft of this test listed it here; adding it to
+# INFRASTRUCTURE_NAMES to satisfy that would have silenced every hardening
+# finding on a hosting control panel's session cookie.
 @pytest.mark.parametrize("name", ["AWSALB", "awsalb", "__cf_bm", "ak_bmsc", "_abck",
                                    "BIGipServerpool_web", "NSC_abc",
-                                   "incap_ses_123_456", "visid_incap_789",
-                                   "whostmgrsession"])
+                                   "incap_ses_123_456", "visid_incap_789"])
 def test_infrastructure_names_match(name):
     assert cookies.is_infrastructure_name(name)
 
@@ -948,7 +965,19 @@ In `__init__.py`, nothing new is exported — `inventory` already is. Confirm wi
 - [ ] **Step 5: Run the suite**
 
 Run: `python -m pytest tests/ -q && ruff check`
-Expected: all pass. If `tests/test_reporting.py` asserts an exact set of inventory keys, update it to include `cookies` — search with `grep -n "caching" tests/test_reporting.py tests/test_headers.py`.
+
+**One existing test WILL fail and must be updated:**
+`tests/test_headers.py::test_the_report_carries_every_inventory` (around line
+1163) asserts the inventory key set is *exactly* the five existing names. Add
+`"cookies"` to that set. It is an exact-set assertion on purpose — a sixth key
+appearing unannounced is precisely what it exists to catch — so update it,
+never loosen it to a subset check.
+
+`tests/test_cli_text.py` (around line 92) hand-builds a fixture document whose
+inventory omits `cookies`. Leave it alone: nothing reads the new key until
+Task 8, and Task 8's renderer reads it with `.get("cookies") or []` so a
+document without the key still renders. A fixture that keeps working when a
+key is absent is evidence the renderer is tolerant, which is wanted.
 
 - [ ] **Step 6: Verify a well-configured cookie is visible**
 
@@ -1066,7 +1095,10 @@ def test_prefix_matching_is_case_insensitive():
 
 
 def test_a_satisfied_prefix_raises_nothing():
-    assert _codes("__Host-sid=x; Secure; Path=/") == []
+    # Scoped to the prefix code deliberately: Task 6 adds hardening findings
+    # to this same cookie (no HttpOnly, no SameSite), so an `== []` assertion
+    # here would be true now and false two tasks later.
+    assert "cookie-prefix-violated" not in _codes("__Host-sid=x; Secure; Path=/")
 
 
 def test_host_prefix_tolerates_domain_on_an_ip_literal_host():
@@ -1434,11 +1466,26 @@ COOKIE_CASES = [
 ]
 ```
 
-and inside `_every_code_headers_can_emit()`:
+and fold it into **both** corpus walkers in that file — they are separate and
+each feeds different bijection tests, so folding into only one leaves the other
+permanently unable to see the new codes:
+
+1. `_every_code_headers_can_emit()` (~line 1045), which feeds the
+   severity/message completeness tests:
 
 ```python
     for present, url in COOKIE_CASES:
         codes |= {f.code for f in headers.analyze(_ex(present, url=url))}
+```
+
+2. `_emitted()` (~line 1032), a generator yielding Finding objects, which feeds
+   the `rendered_messages.txt` snapshot and the CODE_HEADER-vs-finding
+   bijection test. Without this the new codes never reach the snapshot and
+   those tests fail permanently:
+
+```python
+    for present, url in COOKIE_CASES:
+        yield from headers.analyze(_ex(present, url=url))
 ```
 
 Update the census in `test_severity_values_match_the_documented_policy`:
@@ -1447,13 +1494,33 @@ Update the census in `test_severity_values_match_the_documented_policy`:
     assert counts == {"error": 48, "warning": 26, "note": 37}
 ```
 
+- [ ] **Step 7b: Clear the two debts earlier tasks left for this one**
+
+Both were recorded in the task that created them, which is not the task that
+must act on them. Do both now:
+
+1. **Un-skip Task 1's corpus test.** `tests/test_headers.py` carries
+   `test_every_level_a_finding_carries_is_a_real_severity` with
+   `@pytest.mark.skip(reason="COOKIE_CASES lands in Task 5")`. `COOKIE_CASES`
+   now exists — delete the decorator and confirm the test passes.
+2. **Remove the `# noqa: F401` on `Finding` in `cookies.py`**, if Task 2 added
+   one. `Finding` is used from this task onward, so the suppression is now
+   stale and `ruff` should be the thing that notices if that ever changes.
+3. **Remove the `# noqa: F821` on the `COOKIE_CASES` reference** in
+   `tests/test_headers.py` (Task 1 added it, because `ruff` flags an undefined
+   name statically whether or not the test is skipped). Once `COOKIE_CASES`
+   exists the suppression is stale, and leaving it would hide a genuine
+   undefined-name error in that test forever.
+
+Run: `python -m pytest tests/test_headers.py -k every_level -v && ruff check`
+Expected: PASS, and no `noqa` warnings.
+
 - [ ] **Step 8: Regenerate the message snapshot and read the diff**
 
 Run:
 ```bash
 UPDATE_MESSAGE_SNAPSHOT=1 python -m pytest tests/ -k snapshot
 git diff --stat tests/rendered_messages.txt
-git diff tests/rendered_messages.txt
 ```
 Expected: nine added lines and no changes to existing ones. **Read every added sentence.** A template naming `{sources}` beside data carrying `directives` renders as a crash or as nonsense, and this snapshot is the only thing that shows it. `git diff` is read-only and permitted.
 
@@ -1813,8 +1880,9 @@ Census: `assert counts == {"error": 48, "warning": 26, "note": 43}`
 Run:
 ```bash
 UPDATE_MESSAGE_SNAPSHOT=1 python -m pytest tests/ -k snapshot
-git diff tests/rendered_messages.txt
 ```
+
+
 Expected: six added lines. Read them.
 
 - [ ] **Step 7: Run everything**
@@ -1944,13 +2012,24 @@ This sits in `_analyze_one` rather than `_hardening_findings` because it must no
 
 ```python
 def _unknown_attribute(data):
+    # Composes with _cookie_subject rather than reading data["cookie"]
+    # directly: _DISPLAY maps a code to exactly ONE function, and this code's
+    # template also opens with {cookie} as its subject. Setting the key here
+    # would reintroduce the nameless-cookie leading space that
+    # _cookie_subject exists to prevent.
+    fields = _cookie_subject(data)
     suspected = data.get("suspected")
-    return {
-        "cookie": data["cookie"],
-        "attribute": data["attribute"],
-        "detail": (", which may be a misspelling of %s" % suspected) if suspected else "",
-    }
+    fields["attribute"] = data["attribute"]
+    fields["detail"] = (
+        ", which may be a misspelling of %s" % suspected if suspected else ""
+    )
+    return fields
 ```
+
+**Do NOT also register `cookie-unknown-attribute` against `_cookie_subject`
+in `_DISPLAY`** — one entry per code, and `_unknown_attribute` now does both
+jobs. Add a test rendering this finding for a **nameless** cookie, so the
+composition is pinned rather than incidental.
 
 registered as `"cookie-unknown-attribute": _unknown_attribute,` in `_DISPLAY`, with:
 
@@ -1971,7 +2050,6 @@ Census: `assert counts == {"error": 48, "warning": 26, "note": 44}`
 
 ```bash
 UPDATE_MESSAGE_SNAPSHOT=1 python -m pytest tests/ -k snapshot
-git diff tests/rendered_messages.txt
 python -m pytest tests/ -q && ruff check
 ```
 Expected: one added line, rendering both with and without the suspected clause. If only one form appears, add a corpus case for the other.
@@ -2030,7 +2108,26 @@ def test_no_cookies_table_when_the_response_sets_none():
     assert "cookies:" not in text.render(_document_with_headers([]))
 ```
 
-(Reuse whatever helper `tests/test_cli_text.py` already has for building a document; check with `grep -n "^def _" tests/test_cli_text.py` and follow it rather than inventing a second one.)
+**There is no such helper — you write it.** `tests/test_cli_text.py` has a
+module-level `FINDINGS` list and a single module-level `DOCUMENT` dict literal,
+and no factory function. Add a small one that reuses the existing fixture
+rather than duplicating its shape:
+
+```python
+import copy
+
+def _document_with_cookies(rows):
+    """The module's DOCUMENT with a cookies inventory spliced in."""
+    document = copy.deepcopy(DOCUMENT)
+    document["results"][0]["report"]["response"]["inventory"]["cookies"] = rows
+    return document
+```
+
+Deep-copied so a test cannot mutate the shared literal and change another
+test's input. Name your new tests' cookie rows explicitly — each row needs the
+twelve keys `cookie_as_dict` produces, so build them with
+`http_security_test.cookies.cookie_as_dict(cookies.parse_set_cookie("..."))`
+rather than hand-writing dicts that could drift from the real shape.
 
 In `tests/test_cli_explain.py`:
 
@@ -2091,7 +2188,6 @@ In `cli/commands.py`, add `ESCALATABLE` to the `from ..findings import` block (a
 Run:
 ```bash
 python -m pytest tests/test_cli_text.py -q
-git diff tests/cli_terminal_snapshot.txt
 ```
 If `tests/cli_terminal_snapshot.txt` is generated by an env var like the message snapshot, use the same mechanism — check with `grep -rn "cli_terminal_snapshot" tests/`. Read the diff; the column widths in `explain` changed, so alignment shifts are expected and anything else is not.
 
@@ -2121,14 +2217,50 @@ message naming it, matching whatever the existing reserved-flag tests assert.
 
 - [ ] **Step 7: Update CLAUDE.md**
 
-Six edits, each a fact that is now wrong:
+Seven edits, each a fact that is now wrong:
 
 1. **Layout** — add `cookies.py   Set-Cookie: the parser, the name tables, the analysis` to the module list, and add it to the `core` line of the layering block.
-2. **Status** — analyser code count `102` → `118`; the severity census `(39 error / 26 warning / 37 note)` → `(48 error / 26 warning / 44 note)`; consequence slugs `Eight` → `Ten`; `references.py` resolves `40 headers` → `41 headers`; core modules `12` → `13`; test count from the final `pytest` run.
+2. **Two stale code counts, not one.** The `Status` section AND
+   `CLAUDE.md:~1364` in the humble reference entry, which reads "This package
+   has 102 codes over far fewer headers, so that file is a ready-made gap
+   list." Update both. In `Status`: analyser code count `102` → `118`; the severity census `(39 error / 26 warning / 37 note)` → `(48 error / 26 warning / 44 note)`; consequence slugs `Eight` → `Ten`; `references.py` resolves `40 headers` → `41 headers`; core modules `12` → `13`; test count from the final `pytest` run.
 3. **The output schema** — `inventory` gains `"cookies": []`; note it is the sixth key and the only list of parsed objects.
+7. **Two stale "sixth key" claims, now self-contradictory** (raised as a Minor by the Task 4 review). `Content-Type` is discussed as a candidate *sixth* inventory key in two places, and `cookies` has now taken that ordinal:
+   - `CLAUDE.md` line ~316: "A sixth inventory key for it was designed on 2026-08-24 and deferred".
+   - `http_security_test/response.py` line ~1220, the same claim inside `inventory()`'s docstring — two paragraphs below the new cookies paragraph that calls cookies the sixth.
+   Reword both to "a further inventory key" or "a seventh inventory key", whichever reads better in place. **Do not delete the Content-Type reasoning** — it is a recorded decision with a stated trigger (`Vary` as the next candidate), and only its ordinal is wrong.
 4. **Parked, with intent to do** — delete the whole `**`Set-Cookie` analysis**` item; it is done. Leave the two cache items, and update the cache/cookie item's opening: its stated blocker ("land it with the cookie parser") is now satisfied, so restate the remaining blocker as the `caching`-table contract.
 5. **Design principles** — principle 1 needs a sentence: a rating is a code's *default* and a finding may carry its own, which is SARIF's `result.level`.
 6. **Invariants the test suite pins** — the `identity()` bullet says "two cookies each missing `Secure` will be two more" in the future tense. It is now exercised; change the tense and name the test.
+
+- [ ] **Step 7b: Fix the stacked-`which` prose (Task 7 review, Minor)**
+
+`cookie-unknown-attribute`'s suspected-clause form currently renders as a
+run-on with two relative pronouns back to back:
+
+```
+a sets the attribute secrue, which no browser recognises, which may be a misspelling of secure
+```
+
+In `catalog.py`'s `_unknown_attribute`, change the detail string from
+`", which may be a misspelling of %s"` to `" and may be a misspelling of %s"`,
+giving one relative pronoun governing a coordinated predicate:
+
+```
+a sets the attribute secrue, which no browser recognises and may be a misspelling of secure
+```
+
+The wording is snapshot-pinned, so regenerate deliberately and read the diff
+against this task's snapshot:
+
+```bash
+UPDATE_MESSAGE_SNAPSHOT=1 python -m pytest tests/ -k snapshot
+SNAP=.superpowers/sdd/2026-08-30-cookie-analysis/snap-8
+diff "$SNAP/tests/rendered_messages.txt" tests/rendered_messages.txt
+```
+
+Expected: exactly one line changes, and it is the suspected-clause form. The
+no-suspected form must be untouched.
 
 - [ ] **Step 8: Final verification**
 
