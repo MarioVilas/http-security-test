@@ -40,8 +40,7 @@ from . import outcome, scope
 # Everything the fetcher needs, so this module never sees an argparse Namespace.
 Options = collections.namedtuple(
     "Options",
-    "method headers user_agent timeout insecure proxy no_redirect max_redirects "
-    "patterns raw",
+    "method headers user_agent timeout insecure proxy no_redirect max_redirects patterns raw",
 )
 
 
@@ -128,9 +127,7 @@ def build_opener(options):
         context.verify_mode = ssl.CERT_NONE
         handlers.append(urllib.request.HTTPSHandler(context=context))
     if options.proxy:
-        handlers.append(
-            urllib.request.ProxyHandler({"http": options.proxy, "https": options.proxy})
-        )
+        handlers.append(urllib.request.ProxyHandler({"http": options.proxy, "https": options.proxy}))
     return urllib.request.build_opener(*handlers), chain
 
 

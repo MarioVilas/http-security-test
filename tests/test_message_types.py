@@ -40,9 +40,7 @@ def test_headers_keep_order_and_duplicates():
 
 
 def test_mapping_is_derived_lowercased_and_keeps_every_value():
-    r = Response.from_parts(
-        headers=[("Content-Security-Policy", "a"), ("CONTENT-SECURITY-POLICY", "b")]
-    )
+    r = Response.from_parts(headers=[("Content-Security-Policy", "a"), ("CONTENT-SECURITY-POLICY", "b")])
     assert mapping(r.headers) == {"content-security-policy": ["a", "b"]}
 
 
@@ -67,5 +65,10 @@ def test_optional_fields_default_to_none_not_to_a_flattering_value():
     # disabled rather than answered.
     r = Response.from_parts()
     assert (r.status, r.reason, r.version, r.body, r.raw, r.fidelity) == (
-        None, None, None, None, None, None
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
     )

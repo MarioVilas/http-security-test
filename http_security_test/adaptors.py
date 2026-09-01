@@ -37,8 +37,16 @@ body with no error to notice. The body is always the caller's explicit act.
 
 from http_security_test.message import Request, Response
 
-_CURL_VERSIONS = {0: None, 1: "HTTP/1.0", 2: "HTTP/1.1", 3: "HTTP/2",
-                  4: "HTTP/2", 5: "HTTP/2", 30: "HTTP/3", 31: "HTTP/3"}
+_CURL_VERSIONS = {
+    0: None,
+    1: "HTTP/1.0",
+    2: "HTTP/1.1",
+    3: "HTTP/2",
+    4: "HTTP/2",
+    5: "HTTP/2",
+    30: "HTTP/3",
+    31: "HTTP/3",
+}
 
 
 def curl_version(value):
@@ -71,8 +79,7 @@ def http_version(value):
     return "HTTP/%d.%d" % (major, minor or 0)
 
 
-_NIQUESTS_VERSIONS = {9: "HTTP/0.9", 10: "HTTP/1.0", 11: "HTTP/1.1",
-                       20: "HTTP/2", 30: "HTTP/3"}
+_NIQUESTS_VERSIONS = {9: "HTTP/0.9", 10: "HTTP/1.0", 11: "HTTP/1.1", 20: "HTTP/2", 30: "HTTP/3"}
 
 
 def _niquests_version(value):

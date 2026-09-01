@@ -22,8 +22,7 @@ from http_security_test import references
 
 def test_an_mdn_header_resolves_to_the_mdn_pattern():
     assert references.header_url("Content-Security-Policy") == (
-        "https://developer.mozilla.org/docs/Web/HTTP/Reference/Headers/"
-        "Content-Security-Policy"
+        "https://developer.mozilla.org/docs/Web/HTTP/Reference/Headers/Content-Security-Policy"
     )
 
 
@@ -34,18 +33,14 @@ def test_a_header_mdn_does_not_document_falls_back_to_http_dev():
 def test_a_header_with_a_permanent_spec_prefers_it_over_http_dev():
     # RFC and W3C /TR/ URLs are permanent by their publishers' written policy,
     # which http.dev does not have. That ordering is the whole design.
-    assert references.header_url("Public-Key-Pins") == (
-        "https://www.rfc-editor.org/rfc/rfc7469"
-    )
+    assert references.header_url("Public-Key-Pins") == ("https://www.rfc-editor.org/rfc/rfc7469")
     assert references.header_url("P3P") == "https://www.w3.org/TR/P3P"
 
 
 def test_lookup_is_case_insensitive():
     # duplicate-headers findings carry a lowercased name; a case-sensitive
     # lookup would silently produce None for them.
-    assert references.header_url("x-frame-options") == references.header_url(
-        "X-Frame-Options"
-    )
+    assert references.header_url("x-frame-options") == references.header_url("X-Frame-Options")
 
 
 def test_an_unknown_header_resolves_to_none():
@@ -72,12 +67,8 @@ def test_every_security_deprecated_and_cache_header_resolves():
 
 
 def test_taxonomy_urls():
-    assert references.taxonomy_url("CWE-79") == (
-        "https://cwe.mitre.org/data/definitions/79.html"
-    )
-    assert references.taxonomy_url("CAPEC-63") == (
-        "https://capec.mitre.org/data/definitions/63.html"
-    )
+    assert references.taxonomy_url("CWE-79") == ("https://cwe.mitre.org/data/definitions/79.html")
+    assert references.taxonomy_url("CAPEC-63") == ("https://capec.mitre.org/data/definitions/63.html")
 
 
 def test_an_unrecognised_taxonomy_scheme_resolves_to_none():

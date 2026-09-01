@@ -37,13 +37,9 @@ import urllib.parse
 # invented one; `redacted` is a reconstruction known to have lost content.
 FIDELITY = ("capture", "reconstructed", "redacted")
 
-Connection = collections.namedtuple(
-    "Connection", "host ip port scheme", defaults=(None, None, None, None)
-)
+Connection = collections.namedtuple("Connection", "host ip port scheme", defaults=(None, None, None, None))
 
-Exchange = collections.namedtuple(
-    "Exchange", "request response timestamp connection", defaults=(None, None)
-)
+Exchange = collections.namedtuple("Exchange", "request response timestamp connection", defaults=(None, None))
 
 
 def scheme(url):

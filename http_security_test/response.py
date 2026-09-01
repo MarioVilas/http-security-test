@@ -423,9 +423,7 @@ def _analyze_xfo(value):
 
 def _analyze_xcto(value):
     if value.strip().lower() != "nosniff":
-        return [
-            Finding("X-Content-Type-Options", "xcto-invalid", {"value": value.strip()})
-        ]
+        return [Finding("X-Content-Type-Options", "xcto-invalid", {"value": value.strip()})]
     return []
 
 
@@ -480,9 +478,7 @@ def _analyze_ct(value):
     """
     if _media_type(value) not in CT_CHARSET_TYPES or _charset(value):
         return []
-    return [
-        Finding("Content-Type", "ct-no-charset", {"media_type": _media_type(value)})
-    ]
+    return [Finding("Content-Type", "ct-no-charset", {"media_type": _media_type(value)})]
 
 
 def _analyze_csd(value):
@@ -510,13 +506,9 @@ def _analyze_csd(value):
 
     findings = []
     if unquoted:
-        findings.append(
-            Finding("Clear-Site-Data", "csd-unquoted", {"members": unquoted})
-        )
+        findings.append(Finding("Clear-Site-Data", "csd-unquoted", {"members": unquoted}))
     if unknown:
-        findings.append(
-            Finding("Clear-Site-Data", "csd-unknown-type", {"types": unknown})
-        )
+        findings.append(Finding("Clear-Site-Data", "csd-unknown-type", {"types": unknown}))
     return findings
 
 
@@ -547,20 +539,12 @@ def _analyze_ip(value):
     # nothing either, so this answers before the remarks below.
     sources = policy.get("sources")
     if sources is not None and IP_SOURCE_INLINE not in sources:
-        return [
-            Finding(
-                "Integrity-Policy", "ip-sources-without-inline", {"sources": sources}
-            )
-        ]
+        return [Finding("Integrity-Policy", "ip-sources-without-inline", {"sources": sources})]
 
     findings = []
     unknown = sorted(set(destinations) - IP_DESTINATIONS)
     if unknown:
-        findings.append(
-            Finding(
-                "Integrity-Policy", "ip-unknown-destination", {"destinations": unknown}
-            )
-        )
+        findings.append(Finding("Integrity-Policy", "ip-unknown-destination", {"destinations": unknown}))
     if "style" in destinations:
         findings.append(Finding("Integrity-Policy", "ip-style-unsupported"))
     return findings
@@ -698,11 +682,7 @@ def _protects_framing(present):
 
 def _duplicated(present):
     """Names of headers the response repeated but may not legally repeat."""
-    return sorted(
-        name
-        for name, values in present.items()
-        if len(values) > 1 and name not in REPEATABLE_HEADERS
-    )
+    return sorted(name for name, values in present.items() if len(values) > 1 and name not in REPEATABLE_HEADERS)
 
 
 def _analyze_duplicates(present):
@@ -952,10 +932,8 @@ def _reporting_endpoints_apply(secure, host):
 # analysed rather than waved through -- but its absence is not a gap, which is
 # why neither of these is in SECURITY_HEADERS.
 REPORTING_DEFINERS = (
-    ("Reporting-Endpoints", _reporting_endpoints, "re-invalid", "re-ineffective",
-     "re-endpoint-undeliverable"),
-    ("Report-To", _report_to_pairs, "rt-invalid", "rt-ineffective",
-     "rt-endpoint-undeliverable"),
+    ("Reporting-Endpoints", _reporting_endpoints, "re-invalid", "re-ineffective", "re-endpoint-undeliverable"),
+    ("Report-To", _report_to_pairs, "rt-invalid", "rt-ineffective", "rt-endpoint-undeliverable"),
 )
 
 
@@ -988,13 +966,9 @@ def _analyze_reporting_endpoints(present, secure=True, host=None):
         if not _reporting_endpoints_apply(secure, host):
             findings.append(Finding(name, ineffective))
             continue
-        undeliverable = sorted(
-            {group for group, url in pairs if url is not None and not _delivers(url)}
-        )
+        undeliverable = sorted({group for group, url in pairs if url is not None and not _delivers(url)})
         if undeliverable:
-            findings.append(
-                Finding(name, undeliverable_code, {"endpoints": undeliverable})
-            )
+            findings.append(Finding(name, undeliverable_code, {"endpoints": undeliverable}))
     return findings
 
 
@@ -1053,9 +1027,7 @@ def _analyze_ip_reporting(present):
     undefined = [name for name in wanted if name not in defined]
     if not undefined:
         return []
-    return [
-        Finding("Integrity-Policy", "ip-endpoints-undefined", {"endpoints": undefined})
-    ]
+    return [Finding("Integrity-Policy", "ip-endpoints-undefined", {"endpoints": undefined})]
 
 
 # The headers that name a reporting group the way Integrity-Policy names one,
@@ -1265,11 +1237,7 @@ def inventory(exchange):
     return {
         "security": _filter_headers(
             present,
-            SECURITY_HEADERS
-            + REPORTING_HEADERS
-            + CORS_HEADERS
-            + PRESENT_ONLY_HEADERS
-            + tuple(REPORT_ONLY_HEADERS),
+            SECURITY_HEADERS + REPORTING_HEADERS + CORS_HEADERS + PRESENT_ONLY_HEADERS + tuple(REPORT_ONLY_HEADERS),
         ),
         "missing": [name for name in SECURITY_HEADERS if name.lower() not in present],
         "deprecated": _filter_headers(present, DEPRECATED_HEADERS),

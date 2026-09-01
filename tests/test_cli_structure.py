@@ -31,8 +31,18 @@ PACKAGE = pathlib.Path(http_security_test.__file__).parent
 LAYERS = ("core", "adaptors", "formats", "cli")
 
 CORE = (
-    "findings", "catalog", "message", "references", "csp", "hsts",
-    "isolation", "policies", "legacy", "response", "reporting", "exchange",
+    "findings",
+    "catalog",
+    "message",
+    "references",
+    "csp",
+    "hsts",
+    "isolation",
+    "policies",
+    "legacy",
+    "response",
+    "reporting",
+    "exchange",
 )
 
 
@@ -145,9 +155,7 @@ def test_importing_the_library_does_not_import_the_adaptors_or_the_cli():
         "print(sorted(m for m in ('http_security_test.cli', "
         "'http_security_test.adaptors') if m in sys.modules))"
     )
-    done = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
-    )
+    done = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
     assert done.stdout.strip() == "[]"
 
 
@@ -168,9 +176,7 @@ def test_meta_levels_is_the_librarys_own_table_reversed():
     assert set(meta.LEVELS) == set(SEVERITIES)
     assert meta.LEVELS == tuple(reversed(SEVERITIES))
     # Ascending by severity: note is least severe, error the most.
-    assert meta.LEVELS.index("note") < meta.LEVELS.index("warning") < meta.LEVELS.index(
-        "error"
-    )
+    assert meta.LEVELS.index("note") < meta.LEVELS.index("warning") < meta.LEVELS.index("error")
 
 
 def test_misplaced_target_examines_only_argv_zero():
@@ -182,10 +188,7 @@ def test_misplaced_target_examines_only_argv_zero():
     # argument and produced "did you mean: hst scan http://127.0.0.1:8080".
     # Only argv[0] may be examined: that is the one case the feature exists
     # for (`hst example.com`).
-    assert (
-        options.misplaced_target(["--proxy", "http://127.0.0.1:8080", "scan", "a.com"])
-        is None
-    )
+    assert options.misplaced_target(["--proxy", "http://127.0.0.1:8080", "scan", "a.com"]) is None
     assert options.misplaced_target(["-o", "report.json", "scan", "x.com"]) is None
 
 

@@ -62,9 +62,7 @@ def _analyze_pp(value):
         # and quoted its allowlist keywords. That spelling still turns up in
         # Permissions-Policy headers, where it parses as nothing at all.
         if ";" in stripped or "'" in stripped:
-            return [
-                Finding("Permissions-Policy", "pp-legacy-syntax", {"value": stripped})
-            ]
+            return [Finding("Permissions-Policy", "pp-legacy-syntax", {"value": stripped})]
         return [Finding("Permissions-Policy", "pp-invalid", {"item": malformed[0]})]
 
     policy = parse_permissions_policy(stripped)
@@ -119,9 +117,7 @@ def _analyze_fp(value):
 
     wildcarded = sorted(name for name, allow in policy.items() if "*" in allow)
     if wildcarded:
-        findings.append(
-            Finding("Feature-Policy", "fp-wildcard", {"features": wildcarded})
-        )
+        findings.append(Finding("Feature-Policy", "fp-wildcard", {"features": wildcarded}))
 
     return findings
 

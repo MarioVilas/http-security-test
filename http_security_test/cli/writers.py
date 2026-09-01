@@ -83,8 +83,7 @@ def resolve(spec):
     if name is None:
         raise UsageError(
             "cannot tell what format %r should be: write FORMAT:PATH (one of %s) "
-            "or give the file a known extension (%s)"
-            % (spec, ", ".join(FORMATS), ", ".join(sorted(EXTENSIONS)))
+            "or give the file a known extension (%s)" % (spec, ", ".join(FORMATS), ", ".join(sorted(EXTENSIONS)))
         )
     if not path:
         raise UsageError("no path in %r" % spec)

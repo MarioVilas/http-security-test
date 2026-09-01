@@ -33,9 +33,7 @@ from .message import _lookup_all, _sole_value
 # which is what a page doing OAuth-style popup flows needs; it ships in Chromium
 # and Safari but not Firefox, where an unrecognised value falls back to
 # unsafe-none. Only same-origin earns crossOriginIsolated -- see _seeks_isolation.
-COOP_VALUES = frozenset(
-    ["same-origin", "same-origin-allow-popups", "noopener-allow-popups"]
-)
+COOP_VALUES = frozenset(["same-origin", "same-origin-allow-popups", "noopener-allow-popups"])
 
 
 COEP_VALUES = frozenset(["unsafe-none", "require-corp", "credentialless"])
@@ -196,11 +194,7 @@ def _analyze_acam(value):
     fact about the configuration, not two.
     """
     methods = sorted(
-        {
-            method.strip().upper()
-            for method in value.split(",")
-            if method.strip().lower() in FORBIDDEN_METHODS
-        }
+        {method.strip().upper() for method in value.split(",") if method.strip().lower() in FORBIDDEN_METHODS}
     )
     if not methods:
         return []
@@ -343,9 +337,7 @@ def _analyze_cors(present):
         return findings
 
     if _shares_credentials_with_everyone(present):
-        findings.append(
-            Finding("Access-Control-Allow-Origin", "acao-credentials-wildcard")
-        )
+        findings.append(Finding("Access-Control-Allow-Origin", "acao-credentials-wildcard"))
     for name, code in CREDENTIALS_WILDCARD_CODES:
         value = _sole_value(present, name)
         if value is not None and value.strip() == "*":

@@ -32,7 +32,8 @@ def test_a_response_yields_status_reason_version_headers_and_body():
     r = Response.from_bytes(RESPONSE)
     assert (r.status, r.reason, r.version) == (200, "OK", "HTTP/1.1")
     assert mapping(r.headers)["content-security-policy"] == [
-        "default-src 'self'", "script-src 'none'"
+        "default-src 'self'",
+        "script-src 'none'",
     ]
     assert r.body == b"<html></html>"
     assert r.raw == RESPONSE
@@ -42,9 +43,7 @@ def test_repeated_set_cookie_survives_the_comma_in_an_expires_date():
     # Comma-joining is the fourth wrong answer in CLAUDE.md's mapping table and
     # the nastiest, because the result still looks like a header value.
     r = Response.from_bytes(RESPONSE)
-    assert mapping(r.headers)["set-cookie"] == [
-        "a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT"
-    ]
+    assert mapping(r.headers)["set-cookie"] == ["a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT"]
 
 
 def test_http_2_in_a_1_1_shaped_start_line_is_accepted():
@@ -53,8 +52,7 @@ def test_http_2_in_a_1_1_shaped_start_line_is_accepted():
     # reason phrase h2 does not have. Rejecting it refuses the commonest input.
     r = Response.from_bytes(b"HTTP/2 202 Accepted\r\nDate: x\r\n\r\n")
     assert (r.version, r.status, r.reason) == ("HTTP/2", 202, "Accepted")
-    q = Request.from_bytes(b"POST /x HTTP/2\r\nHost: a.example\r\n\r\n",
-                           url="https://a.example/x")
+    q = Request.from_bytes(b"POST /x HTTP/2\r\nHost: a.example\r\n\r\n", url="https://a.example/x")
     assert (q.method, q.version) == ("POST", "HTTP/2")
 
 

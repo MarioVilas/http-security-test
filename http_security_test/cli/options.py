@@ -56,9 +56,7 @@ def misplaced_target(argv):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(
-        prog="hst", description="HTTP security header analysis."
-    )
+    parser = argparse.ArgumentParser(prog="hst", description="HTTP security header analysis.")
     parser.add_argument(
         "--version",
         action="version",
@@ -77,9 +75,7 @@ def _add_scan(verbs):
         description="Fetch each URL and analyse the response. The terminal "
         "always shows the run; -o writes evidence files.",
     )
-    parser.add_argument(
-        "url", nargs="+", metavar="URL", help="target; '-' reads targets from stdin"
-    )
+    parser.add_argument("url", nargs="+", metavar="URL", help="target; '-' reads targets from stdin")
 
     request = parser.add_argument_group("request")
     request.add_argument(
@@ -93,9 +89,7 @@ def _add_scan(verbs):
     request.add_argument("-A", "--user-agent", default=meta.USER_AGENT)
     request.add_argument("-X", "--method", default="GET", help="default GET")
     request.add_argument("-t", "--timeout", type=float, default=15.0)
-    request.add_argument(
-        "-k", "--insecure", action="store_true", help="do not verify TLS certificates"
-    )
+    request.add_argument("-k", "--insecure", action="store_true", help="do not verify TLS certificates")
     request.add_argument("--proxy", metavar="URL", help="send through this proxy")
 
     wander = parser.add_argument_group("redirects and scope")
@@ -123,24 +117,13 @@ def _add_scan(verbs):
         action="append",
         default=[],
         metavar="FORMAT:PATH",
-        help="write a file; format may be omitted when the extension says it. "
-        "'-' means stdout. Repeatable.",
+        help="write a file; format may be omitted when the extension says it. '-' means stdout. Repeatable.",
     )
-    output.add_argument(
-        "-oA", "--output-all", metavar="PREFIX", help="write every format as PREFIX.*"
-    )
-    output.add_argument(
-        "-j", "--json", action="store_true", help="shorthand for -o json:-"
-    )
-    output.add_argument(
-        "--color", choices=("auto", "always", "never"), default="auto"
-    )
-    output.add_argument(
-        "-q", "--quiet", action="store_true", help="findings only, no inventories"
-    )
-    output.add_argument(
-        "-c", "--codes", action="store_true", help="show each finding's code and data"
-    )
+    output.add_argument("-oA", "--output-all", metavar="PREFIX", help="write every format as PREFIX.*")
+    output.add_argument("-j", "--json", action="store_true", help="shorthand for -o json:-")
+    output.add_argument("--color", choices=("auto", "always", "never"), default="auto")
+    output.add_argument("-q", "--quiet", action="store_true", help="findings only, no inventories")
+    output.add_argument("-c", "--codes", action="store_true", help="show each finding's code and data")
     output.add_argument(
         "--min-level",
         choices=meta.LEVELS,
@@ -159,7 +142,10 @@ def _add_scan(verbs):
         help="include the base64 raw blobs (CARRIES Set-Cookie / Authorization)",
     )
     output.add_argument(
-        "--ignore-cookie", metavar="NAME", action="append", default=[],
+        "--ignore-cookie",
+        metavar="NAME",
+        action="append",
+        default=[],
         help="not implemented yet: suppress hardening findings for a cookie name",
     )
 
@@ -171,8 +157,7 @@ def _add_explain(verbs):
     parser = verbs.add_parser(
         "explain",
         help="what a finding code means",
-        description="Print each code's level and message template. "
-        "With no arguments, list every code.",
+        description="Print each code's level and message template. With no arguments, list every code.",
     )
     parser.add_argument("code", nargs="*", metavar="CODE")
     parser.set_defaults(run=commands.do_explain)

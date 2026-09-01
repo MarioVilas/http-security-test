@@ -87,10 +87,16 @@ class FakeOpener:
 # not "tidy" these into one consistent shape.
 CLASSIFY_CASES = [
     (urllib.error.URLError(socket.gaierror(-2, "Name or service not known")), "dns"),
-    (urllib.error.URLError(ConnectionRefusedError(111, "Connection refused")), "refused"),
+    (
+        urllib.error.URLError(ConnectionRefusedError(111, "Connection refused")),
+        "refused",
+    ),
     (urllib.error.URLError(TimeoutError("timed out")), "timeout"),
     (urllib.error.URLError(socket.timeout("timed out")), "timeout"),
-    (urllib.error.URLError(ConnectionResetError(104, "Connection reset by peer")), "reset"),
+    (
+        urllib.error.URLError(ConnectionResetError(104, "Connection reset by peer")),
+        "reset",
+    ),
     (urllib.error.URLError(ssl.SSLCertVerificationError("bad cert")), "tls"),
     (urllib.error.URLError(ssl.SSLError("handshake failure")), "tls"),
     (http.client.BadStatusLine("garbage"), "protocol"),
@@ -132,9 +138,7 @@ def test_fetch_returns_an_iterable_of_one_facts_and_exchange_pair():
 
 
 def test_fetch_hands_over_headers_the_library_can_read():
-    opener = FakeOpener(
-        FakeResponse("https://example.com/", pairs=[("Server", "nginx"), ("Server", "b")])
-    )
+    opener = FakeOpener(FakeResponse("https://example.com/", pairs=[("Server", "nginx"), ("Server", "b")]))
     _facts, item = live.fetch("https://example.com/", OPTIONS, opener=opener)[0]
     # mapping() keeps duplicates as a list under a lowercased name, and the
     # response's headers are the raw (name, value) pairs -- duplicates intact
@@ -185,9 +189,7 @@ def test_raw_blobs_round_trip_through_the_library_parser():
     from http_security_test import parse_raw_headers
 
     options = OPTIONS._replace(raw=True)
-    opener = FakeOpener(
-        FakeResponse("https://example.com/", pairs=[("Server", "nginx")])
-    )
+    opener = FakeOpener(FakeResponse("https://example.com/", pairs=[("Server", "nginx")]))
     _facts, item = live.fetch("https://example.com/", options, opener=opener)[0]
     assert parse_raw_headers(item.response.raw)["server"] == ["nginx"]
     # Both messages go through from_parts() now, which keeps `raw` as
@@ -228,12 +230,8 @@ def test_raw_does_not_change_what_the_analyser_reads():
         "https://example.com/",
         pairs=[("Server", "nginx\r\n\tbuilt-from-source")],
     )
-    _facts, plain = live.fetch(
-        "https://example.com/", OPTIONS, opener=FakeOpener(response)
-    )[0]
-    _facts, captured = live.fetch(
-        "https://example.com/", OPTIONS._replace(raw=True), opener=FakeOpener(response)
-    )[0]
+    _facts, plain = live.fetch("https://example.com/", OPTIONS, opener=FakeOpener(response))[0]
+    _facts, captured = live.fetch("https://example.com/", OPTIONS._replace(raw=True), opener=FakeOpener(response))[0]
     assert plain.response.headers == captured.response.headers
     # And pinned against reassembly specifically: the live value survives with
     # its CRLF and tab intact, not rejoined into one line.
@@ -258,12 +256,8 @@ def test_raw_does_not_change_what_the_request_object_says_was_sent():
     # --raw-off branch rather than merely differently formatted.
     options = OPTIONS._replace(headers=["X-Test: yes"])
     response = FakeResponse("https://example.com/")
-    _facts, plain = live.fetch(
-        "https://example.com/", options, opener=FakeOpener(response)
-    )[0]
-    _facts, captured = live.fetch(
-        "https://example.com/", options._replace(raw=True), opener=FakeOpener(response)
-    )[0]
+    _facts, plain = live.fetch("https://example.com/", options, opener=FakeOpener(response))[0]
+    _facts, captured = live.fetch("https://example.com/", options._replace(raw=True), opener=FakeOpener(response))[0]
     assert plain.request.method == captured.request.method == "GET"
     assert plain.request.headers == captured.request.headers
     assert dict(plain.request.headers)["X-Test"] == "yes"
@@ -278,9 +272,7 @@ def test_raw_does_not_change_what_the_request_object_says_was_sent():
 def test_the_chain_follows_an_in_scope_redirect():
     chain = live._Chain(("example.com", "*.example.com"))
     request = urllib.request.Request("https://example.com/")
-    result = chain.redirect_request(
-        request, None, 302, "Found", email.message.Message(), "https://www.example.com/"
-    )
+    result = chain.redirect_request(request, None, 302, "Found", email.message.Message(), "https://www.example.com/")
     assert result is not None
     assert chain.hops[-1].followed is True
 
@@ -288,9 +280,7 @@ def test_the_chain_follows_an_in_scope_redirect():
 def test_the_chain_refuses_an_out_of_scope_redirect():
     chain = live._Chain(("example.com", "*.example.com"))
     request = urllib.request.Request("https://example.com/")
-    result = chain.redirect_request(
-        request, None, 302, "Found", email.message.Message(), "https://evil.test/"
-    )
+    result = chain.redirect_request(request, None, 302, "Found", email.message.Message(), "https://evil.test/")
     assert result is None
     assert chain.hops[-1].followed is False
     assert chain.hops[-1].refused == "scope"
@@ -302,7 +292,12 @@ def test_the_chain_records_a_refusal_when_redirects_are_off():
     request = urllib.request.Request("https://example.com/")
     assert (
         chain.redirect_request(
-            request, None, 301, "Moved", email.message.Message(), "https://example.com/x"
+            request,
+            None,
+            301,
+            "Moved",
+            email.message.Message(),
+            "https://example.com/x",
         )
         is None
     )
@@ -312,9 +307,7 @@ def test_the_chain_records_a_refusal_when_redirects_are_off():
 def test_build_opener_installs_a_proxy_for_both_schemes():
     options = OPTIONS._replace(proxy="http://127.0.0.1:8080")
     opener, chain = live.build_opener(options)
-    proxies = [
-        h for h in opener.handlers if isinstance(h, urllib.request.ProxyHandler)
-    ]
+    proxies = [h for h in opener.handlers if isinstance(h, urllib.request.ProxyHandler)]
     assert len(proxies) == 1
     assert proxies[0].proxies["https"] == "http://127.0.0.1:8080"
     assert chain.patterns == options.patterns
@@ -325,11 +318,7 @@ def test_build_opener_disables_verification_only_when_insecure():
     # test has to look at verify_mode rather than at whether one exists.
     def verify_modes(options):
         opener, _ = live.build_opener(options)
-        return [
-            h._context.verify_mode
-            for h in opener.handlers
-            if isinstance(h, urllib.request.HTTPSHandler)
-        ]
+        return [h._context.verify_mode for h in opener.handlers if isinstance(h, urllib.request.HTTPSHandler)]
 
     assert ssl.CERT_NONE not in verify_modes(OPTIONS)
     assert ssl.CERT_NONE in verify_modes(OPTIONS._replace(insecure=True))
@@ -338,12 +327,8 @@ def test_build_opener_disables_verification_only_when_insecure():
 def test_the_chain_stops_at_the_redirect_limit():
     chain = live._Chain(("*.example.com", "example.com"), limit=1)
     request = urllib.request.Request("https://example.com/")
-    chain.redirect_request(
-        request, None, 302, "Found", email.message.Message(), "https://a.example.com/"
-    )
-    chain.redirect_request(
-        request, None, 302, "Found", email.message.Message(), "https://b.example.com/"
-    )
+    chain.redirect_request(request, None, 302, "Found", email.message.Message(), "https://a.example.com/")
+    chain.redirect_request(request, None, 302, "Found", email.message.Message(), "https://b.example.com/")
     assert chain.hops[-1].refused == "max-redirects"
 
 

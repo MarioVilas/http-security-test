@@ -153,9 +153,7 @@ def _git_call(tokens):
     """
     index = 0
     # env assignments and `env`/`command`/`sudo` style prefixes
-    while index < len(tokens) and re.fullmatch(
-        r"[A-Za-z_][A-Za-z0-9_]*=.*", tokens[index]
-    ):
+    while index < len(tokens) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", tokens[index]):
         index += 1
     if index >= len(tokens):
         return None

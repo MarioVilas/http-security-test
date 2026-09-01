@@ -77,9 +77,7 @@ def test_explain_names_the_owning_header(capsys):
     """
     main(["explain", "csp-unsafe-inline"])
     out = capsys.readouterr().out
-    assert re.search(
-        r"^csp-unsafe-inline\s+error\s+Content-Security-Policy\s*$", out, re.MULTILINE
-    )
+    assert re.search(r"^csp-unsafe-inline\s+error\s+Content-Security-Policy\s*$", out, re.MULTILINE)
 
 
 def test_explain_lists_consequences_and_urls(capsys):

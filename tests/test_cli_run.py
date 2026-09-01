@@ -59,9 +59,7 @@ def test_the_source_carries_a_kind_discriminator():
 def test_hops_serialise_with_wire_names():
     hops = (outcome.Hop("http://a/", 301, "https://a/"),)
     source = run.analysed(_facts(hops=hops), REPORT)["source"]
-    assert source["hops"] == [
-        {"from": "http://a/", "code": 301, "to": "https://a/", "followed": True}
-    ]
+    assert source["hops"] == [{"from": "http://a/", "code": 301, "to": "https://a/", "followed": True}]
 
 
 def test_a_refused_hop_records_why():
@@ -108,7 +106,5 @@ def test_the_document_is_json_serialisable_without_an_encoder():
     import json
 
     hops = (outcome.Hop("https://a/", 302, "https://b/", False, "scope"),)
-    document = run.run_document(
-        [run.analysed(_facts(hops=hops), REPORT)], "a", "b"
-    )
+    document = run.run_document([run.analysed(_facts(hops=hops), REPORT)], "a", "b")
     assert json.loads(json.dumps(document)) == document

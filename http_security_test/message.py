@@ -123,12 +123,12 @@ def _filter_headers(present, wanted):
             filtered[name] = _single_or_list(values)
     return filtered
 
+
 _REQUEST_FIELDS = "url method version headers body raw fidelity"
 _RESPONSE_FIELDS = "status reason version headers body raw fidelity"
 
 
-class Request(collections.namedtuple("Request", _REQUEST_FIELDS,
-                                     defaults=(None, None, (), None, None, None))):
+class Request(collections.namedtuple("Request", _REQUEST_FIELDS, defaults=(None, None, (), None, None, None))):
     """One HTTP request as this package models it.
 
     `url` is required and is the one fact the wire cannot supply: an
@@ -144,11 +144,9 @@ class Request(collections.namedtuple("Request", _REQUEST_FIELDS,
     __slots__ = ()
 
     @classmethod
-    def from_parts(cls, url, method=None, version=None, headers=(),
-                   body=None, raw=None, fidelity=None):
+    def from_parts(cls, url, method=None, version=None, headers=(), body=None, raw=None, fidelity=None):
         """A request from already-parsed pieces, as an adaptor supplies them."""
-        return cls(url, method, version, tuple(tuple(p) for p in headers),
-                   body, raw, fidelity)
+        return cls(url, method, version, tuple(tuple(p) for p in headers), body, raw, fidelity)
 
     @classmethod
     def from_bytes(cls, data, url, fidelity=None):
@@ -167,8 +165,7 @@ class Request(collections.namedtuple("Request", _REQUEST_FIELDS,
         return cls(url, method, version, pairs, body, data, fidelity)
 
 
-class Response(collections.namedtuple("Response", _RESPONSE_FIELDS,
-                                      defaults=(None, None, None, (), None, None, None))):
+class Response(collections.namedtuple("Response", _RESPONSE_FIELDS, defaults=(None, None, None, (), None, None, None))):
     """One HTTP response as this package models it.
 
     `reason` is None for an HTTP/2 exchange rather than empty: RFC 9113 carries
@@ -179,11 +176,9 @@ class Response(collections.namedtuple("Response", _RESPONSE_FIELDS,
     __slots__ = ()
 
     @classmethod
-    def from_parts(cls, status=None, reason=None, version=None, headers=(),
-                   body=None, raw=None, fidelity=None):
+    def from_parts(cls, status=None, reason=None, version=None, headers=(), body=None, raw=None, fidelity=None):
         """A response from already-parsed pieces, as an adaptor supplies them."""
-        return cls(status, reason, version, tuple(tuple(p) for p in headers),
-                   body, raw, fidelity)
+        return cls(status, reason, version, tuple(tuple(p) for p in headers), body, raw, fidelity)
 
     @classmethod
     def from_bytes(cls, data, fidelity=None):

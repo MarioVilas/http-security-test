@@ -34,8 +34,7 @@ import json
 # different fact. This is SARIF's shape -- `result.level` overrides
 # `rule.defaultConfiguration.level` -- and the report schema was already on
 # this side of the line, denormalising `level` onto every finding.
-Finding = collections.namedtuple("Finding", "header code data level",
-                                defaults=(None, None))
+Finding = collections.namedtuple("Finding", "header code data level", defaults=(None, None))
 
 
 def identity(finding):
@@ -368,11 +367,11 @@ CODE_HEADER = {
 # consequence, and acao-wildcard is a note with a real one.
 CODE_CONSEQUENCES = {
     # -- Content-Security-Policy
-    "csp-deprecated-directive": (),      # parsed and ignored; nothing was lost
+    "csp-deprecated-directive": (),  # parsed and ignored; nothing was lost
     "csp-frame-ancestors-wildcard": ("clickjacking",),
     "csp-http-source": ("mitm", "xss"),  # a plaintext script source is swappable
     "csp-invalid-keyword": ("xss",),
-    "csp-ip-source": (),                 # browsers do not match it; a dev leftover
+    "csp-ip-source": (),  # browsers do not match it; a dev leftover
     "csp-missing": ("xss",),
     "csp-missing-semicolon": ("xss",),
     "csp-no-base-uri": ("xss",),
@@ -381,9 +380,9 @@ CODE_CONSEQUENCES = {
     "csp-no-object-src": ("xss",),
     "csp-nonce-weak": ("xss",),
     "csp-plain-scheme": ("xss",),
-    "csp-report-to-undefined": (),       # reporting: the operator loses a report
-    "csp-ro-unenforced": (),             # report-only content decides nothing
-    "csp-unknown-directive": (),         # what it meant to do is unknowable
+    "csp-report-to-undefined": (),  # reporting: the operator loses a report
+    "csp-ro-unenforced": (),  # report-only content decides nothing
+    "csp-unknown-directive": (),  # what it meant to do is unknowable
     "csp-unsafe-eval": ("xss",),
     "csp-unsafe-inline": ("xss",),
     # Not xss: the message is explicit that injected CSS cannot run script. It
@@ -428,7 +427,7 @@ CODE_CONSEQUENCES = {
     "acao-credentials-wildcard": (),
     "acao-invalid-origin": (),
     "acao-multiple-origins": (),
-    "acao-null": ("cors-data-theft",),   # any sandboxed frame can send Origin: null
+    "acao-null": ("cors-data-theft",),  # any sandboxed frame can send Origin: null
     "acao-wildcard": ("cors-data-theft",),
     # -- Cross-Origin-Embedder-Policy
     "coep-invalid": ("cross-origin-leak",),
@@ -455,33 +454,33 @@ CODE_CONSEQUENCES = {
     # -- X-Permitted-Cross-Domain-Policies. CWE-942 is literally "Permissive
     # Cross-domain Security Policy with Untrusted Domains", written for this.
     "xpcdp-all": ("cors-data-theft",),
-    "xpcdp-deprecated": (),              # the restrictive setting; no defect
+    "xpcdp-deprecated": (),  # the restrictive setting; no defect
     "xpcdp-invalid": ("cors-data-theft",),
     "xpcdp-policy-file": ("cors-data-theft",),
     # -- X-XSS-Protection
     "xxp-blocked": ("cross-origin-leak",),  # the message names a side channel
-    "xxp-deprecated": (),                   # "present but disabled" is correct
-    "xxp-enabled": ("xss",),                # the auditor introduced XSS
-    "xxp-invalid": (),                      # falls back to a default that is inert
+    "xxp-deprecated": (),  # "present but disabled" is correct
+    "xxp-enabled": ("xss",),  # the auditor introduced XSS
+    "xxp-invalid": (),  # falls back to a default that is inert
     # -- Permissions-Policy / Feature-Policy
     "pp-empty": ("permission-abuse",),
-    "pp-invalid": ("permission-abuse",),        # whole header ignored
+    "pp-invalid": ("permission-abuse",),  # whole header ignored
     "pp-legacy-syntax": ("permission-abuse",),  # whole header ignored
     "pp-missing": ("permission-abuse",),
     "pp-wildcard": ("permission-abuse",),
-    "fp-conflicts": (),                         # says which header wins, not a risk
+    "fp-conflicts": (),  # says which header wins, not a risk
     "fp-deprecated": (),
     "fp-empty": ("permission-abuse",),
     "fp-wildcard": ("permission-abuse",),
     # -- Integrity-Policy. Its job is to refuse subresources with no integrity
     # metadata, so a policy that enforces nothing leaves a compromised CDN
     # script running in the page.
-    "ip-endpoints-undefined": (),               # reporting only
+    "ip-endpoints-undefined": (),  # reporting only
     "ip-invalid": ("xss",),
     "ip-no-blocked-destinations": ("xss",),
     "ip-ro-unenforced": (),
     "ip-sources-without-inline": ("xss",),
-    "ip-style-unsupported": (),                 # no engine implements it either way
+    "ip-style-unsupported": (),  # no engine implements it either way
     "ip-unknown-destination": ("xss",),
     # -- Reporting. The whole family carries nothing, which is the same
     # reasoning that rates it all `note`: a reporting failure costs the
@@ -497,13 +496,13 @@ CODE_CONSEQUENCES = {
     "xcsp-deprecated": ("xss",),
     "xwkcsp-deprecated": ("xss",),
     # -- Everything else that withholds no protection.
-    "ct-no-charset": (),        # the message says outright: not a defect
+    "ct-no-charset": (),  # the message says outright: not a defect
     "ect-deprecated": (),
-    "hpkp-deprecated": (),      # browsers removed pinning; the pins bind nothing
+    "hpkp-deprecated": (),  # browsers removed pinning; the pins bind nothing
     "hpkp-ro-deprecated": (),
     "p3p-deprecated": (),
     "xdo-deprecated": (),
-    "xdpc-nonstandard": (),     # `on` is the default everywhere it works
+    "xdpc-nonstandard": (),  # `on` is the default everywhere it works
     # Ambiguity rather than a named risk: which value wins is client-specific,
     # so what it costs depends on which header repeated and cannot be said here.
     "duplicate-headers": (),
@@ -590,14 +589,16 @@ def severity(code):
 
 # Codes whose level can be raised above their default by evidence in `data`.
 # `hst explain` reads this so it can say the level it prints is a floor.
-ESCALATABLE = frozenset([
-    "cookie-domain-broad",
-    "cookie-no-httponly",
-    "cookie-no-samesite",
-    "cookie-no-secure",
-    "cookie-persistent",
-    "cookie-samesite-none",
-])
+ESCALATABLE = frozenset(
+    [
+        "cookie-domain-broad",
+        "cookie-no-httponly",
+        "cookie-no-samesite",
+        "cookie-no-secure",
+        "cookie-persistent",
+        "cookie-samesite-none",
+    ]
+)
 
 
 def level_of(finding):

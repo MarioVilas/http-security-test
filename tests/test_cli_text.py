@@ -114,9 +114,7 @@ def _document_with_cookies(rows):
 
 def test_the_cookies_table_renders_one_line_per_cookie():
     rows = [
-        cookies.cookie_as_dict(
-            cookies.parse_set_cookie("sid=abc; Secure; HttpOnly; SameSite=Strict")
-        ),
+        cookies.cookie_as_dict(cookies.parse_set_cookie("sid=abc; Secure; HttpOnly; SameSite=Strict")),
         cookies.cookie_as_dict(cookies.parse_set_cookie("lang=en")),
     ]
     out = text.render(_document_with_cookies(rows))
@@ -142,12 +140,10 @@ def test_the_terminal_never_prints_a_cookie_value():
     # substring presence check, and all of them keep passing if a future edit
     # appends row["value"] to the flags list in _inventory_lines.
     rows = [
-        cookies.cookie_as_dict(cookies.parse_set_cookie(
-            "sid=UNIQUE-SENTINEL-VALUE-9f3a; Secure; HttpOnly; SameSite=Strict"
-        )),
         cookies.cookie_as_dict(
-            cookies.parse_set_cookie("AWSALB=SENTINEL-ROUTING-7b21")
+            cookies.parse_set_cookie("sid=UNIQUE-SENTINEL-VALUE-9f3a; Secure; HttpOnly; SameSite=Strict")
         ),
+        cookies.cookie_as_dict(cookies.parse_set_cookie("AWSALB=SENTINEL-ROUTING-7b21")),
     ]
     out = text.render(_document_with_cookies(rows))
     # the names and attributes are wanted...
@@ -206,18 +202,22 @@ def test_a_finding_line_names_its_consequences():
 
 
 def test_a_finding_with_no_consequence_gets_no_brackets():
-    line = next(
-        l for l in text.render(DOCUMENT).splitlines() if "X-DNS-Prefetch-Control" in l
-    )
+    line = next(l for l in text.render(DOCUMENT).splitlines() if "X-DNS-Prefetch-Control" in l)
     assert "[" not in line
 
 
 def test_a_finding_missing_the_key_entirely_still_renders():
     # A caller on the old schema, or a hand-built document. .get() not [].
-    stale = {"header": "X-Frame-Options", "code": "xfo-missing",
-             "level": "warning", "data": {}, "message": "missing"}
-    assert "X-Frame-Options" in "\n".join(text._finding_lines(
-        {"response": {"findings": [stale]}}, False, False, "note"))
+    stale = {
+        "header": "X-Frame-Options",
+        "code": "xfo-missing",
+        "level": "warning",
+        "data": {},
+        "message": "missing",
+    }
+    assert "X-Frame-Options" in "\n".join(
+        text._finding_lines({"response": {"findings": [stale]}}, False, False, "note")
+    )
 
 
 def test_min_level_filters_the_terminal():
@@ -247,9 +247,7 @@ def test_the_summary_orders_failure_kinds_by_failure_kinds_not_alphabetically():
     # other) -- timeout precedes reset there but follows it alphabetically,
     # so this pair is the one that tells sorted() apart from the declared
     # table.
-    assert outcome.FAILURE_KINDS.index("timeout") < outcome.FAILURE_KINDS.index(
-        "reset"
-    )
+    assert outcome.FAILURE_KINDS.index("timeout") < outcome.FAILURE_KINDS.index("reset")
     document = {
         "schema": 1,
         "tool": {"name": "http-security-test", "version": "0.1.0"},
@@ -268,9 +266,7 @@ def test_the_summary_orders_failure_kinds_by_failure_kinds_not_alphabetically():
         ],
     }
     out = text.render(document)
-    summary = next(
-        line for line in out.splitlines() if line.strip().startswith("failures:")
-    )
+    summary = next(line for line in out.splitlines() if line.strip().startswith("failures:"))
     assert summary.index("timeout") < summary.index("reset")
 
 
@@ -292,6 +288,7 @@ def test_cli_snapshot_matches():
 
 # --- final review, M2 and M3: the cookies table's two wrong renderings ------
 
+
 def test_a_nameless_cookie_gets_the_same_placeholder_the_catalog_gives_it():
     # An empty name is legal (rfc6265bis 5.2 step 3). Task 6 gave it a
     # readable subject in catalog.py; the inventory renderer never got the
@@ -306,11 +303,7 @@ def test_a_cookie_with_only_non_security_attributes_is_not_called_bare():
     # `flags` inspects five attributes, so Path and Expires render as "no
     # attributes" -- factually wrong, and it hid the persistence on exactly
     # the infrastructure cookies whose findings are suppressed.
-    rows = [
-        cookies.cookie_as_dict(cookies.parse_set_cookie(
-            "AWSALB=x; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT"
-        ))
-    ]
+    rows = [cookies.cookie_as_dict(cookies.parse_set_cookie("AWSALB=x; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT"))]
     out = text.render(_document_with_cookies(rows))
     assert "no security attributes" in out
     assert "no attributes\n" not in out

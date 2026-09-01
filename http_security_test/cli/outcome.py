@@ -35,9 +35,7 @@ whatever it is handed; a `Run` supplies exactly those names.
 
 import collections
 
-Hop = collections.namedtuple(
-    "Hop", "origin code destination followed refused", defaults=(True, None)
-)
+Hop = collections.namedtuple("Hop", "origin code destination followed refused", defaults=(True, None))
 
 Failure = collections.namedtuple("Failure", "target kind message")
 
@@ -51,6 +49,4 @@ FAILURE_KINDS = ("dns", "refused", "timeout", "reset", "tls", "protocol", "other
 # happened -- these are facts about the fetch, kept apart from facts about the
 # message so run.analysed() has something to read even when there is no
 # message worth analysing.
-Run = collections.namedtuple(
-    "Run", "kind target url status reason hops", defaults=((),)
-)
+Run = collections.namedtuple("Run", "kind target url status reason hops", defaults=((),))

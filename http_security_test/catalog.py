@@ -57,20 +57,16 @@ MESSAGES = {
         "on which value wins, so the response does not mean one thing"
     ),
     "coep-ro-unenforced": (
-        "present but {enforcing} is not, so the policy is measured and never "
-        "applied; nothing here blocks anything"
+        "present but {enforcing} is not, so the policy is measured and never applied; nothing here blocks anything"
     ),
     "coop-ro-unenforced": (
-        "present but {enforcing} is not, so the policy is measured and never "
-        "applied; nothing here blocks anything"
+        "present but {enforcing} is not, so the policy is measured and never applied; nothing here blocks anything"
     ),
     "csp-ro-unenforced": (
-        "present but {enforcing} is not, so the policy is measured and never "
-        "applied; nothing here blocks anything"
+        "present but {enforcing} is not, so the policy is measured and never applied; nothing here blocks anything"
     ),
     "ip-ro-unenforced": (
-        "present but {enforcing} is not, so the policy is measured and never "
-        "applied; nothing here blocks anything"
+        "present but {enforcing} is not, so the policy is measured and never applied; nothing here blocks anything"
     ),
     # -- Content-Security-Policy --------------------------------------------
     "csp-unsafe-inline": (
@@ -83,43 +79,30 @@ MESSAGES = {
         "source, read page data through selector-driven requests; it cannot "
         "run script"
     ),
-    "csp-unsafe-eval": (
-        "present but allows unsafe-eval in script-src, permitting strings to "
-        "be executed as code"
-    ),
+    "csp-unsafe-eval": ("present but allows unsafe-eval in script-src, permitting strings to be executed as code"),
     "csp-no-default-src": (
-        "present but sets neither default-src nor script-src, so script "
-        "loading is left unrestricted"
+        "present but sets neither default-src nor script-src, so script loading is left unrestricted"
     ),
-    "csp-wildcard": (
-        "present but uses a wildcard source (*) in {directives}, allowing "
-        "content from any origin"
-    ),
+    "csp-wildcard": ("present but uses a wildcard source (*) in {directives}, allowing content from any origin"),
     "csp-no-frame-ancestors": (
-        "present but sets no frame-ancestors directive, so the page can be "
-        "framed by any origin"
+        "present but sets no frame-ancestors directive, so the page can be framed by any origin"
     ),
     "csp-frame-ancestors-wildcard": (
         "present but sets frame-ancestors to *, so the page can be framed by "
         "any origin, exactly as if the directive were absent"
     ),
     "csp-no-object-src": (
-        "present but sets neither object-src nor default-src, so plugin "
-        "content is left unrestricted"
+        "present but sets neither object-src nor default-src, so plugin content is left unrestricted"
     ),
     "csp-no-base-uri": (
-        "present but sets no base-uri directive, so an injected <base> tag can "
-        "redirect every relative URL on the page"
+        "present but sets no base-uri directive, so an injected <base> tag can redirect every relative URL on the page"
     ),
     "csp-plain-scheme": (
         "present but allows the bare scheme {schemes}, so anything served over "
         "it counts as an allowed source: every host on the web for http: and "
         "https:, any attacker-authored payload for data:"
     ),
-    "csp-http-source": (
-        "present but allows {sources} over plaintext HTTP, which anyone on the "
-        "path can replace"
-    ),
+    "csp-http-source": ("present but allows {sources} over plaintext HTTP, which anyone on the path can replace"),
     "csp-ip-source": (
         "present but allows the IP address {addresses}, which browsers do not "
         "match against and which usually means a development entry reached "
@@ -130,16 +113,13 @@ MESSAGES = {
         "missing and that directive is not in force at all"
     ),
     "csp-unknown-directive": (
-        "present but sets {directives}, which no browser recognises, so that "
-        "part of the policy does nothing"
+        "present but sets {directives}, which no browser recognises, so that part of the policy does nothing"
     ),
     "csp-deprecated-directive": (
-        "present but sets {directives}, which was dropped from the standard "
-        "and is parsed and ignored"
+        "present but sets {directives}, which was dropped from the standard and is parsed and ignored"
     ),
     "csp-invalid-keyword": (
-        "present but lists {sources}, which is read as a hostname rather than "
-        "the keyword it resembles"
+        "present but lists {sources}, which is read as a hostname rather than the keyword it resembles"
     ),
     "csp-nonce-weak": (
         "present but its nonce {nonces} is guessable: nonces need at least "
@@ -152,29 +132,22 @@ MESSAGES = {
         "policy and permits plaintext connections again"
     ),
     "hsts-max-age-short": (
-        "present but its max-age is only {max_age} seconds, below the "
-        "recommended minimum of {minimum} (six months)"
+        "present but its max-age is only {max_age} seconds, below the recommended minimum of {minimum} (six months)"
     ),
     "hsts-no-include-subdomains": (
-        "present but does not set includeSubDomains, leaving subdomains "
-        "reachable over plaintext HTTP"
+        "present but does not set includeSubDomains, leaving subdomains reachable over plaintext HTTP"
     ),
     "hsts-preload-ineffective": (
-        "present with preload, but the preload list requires {unmet}, so the "
-        "domain would not be accepted"
+        "present with preload, but the preload list requires {unmet}, so the domain would not be accepted"
     ),
     "hsts-not-preloaded": (
         "present with preload, but {host} is not on the list browsers ship, so "
         "the very first visit is still unprotected"
     ),
     # -- cross-origin isolation and CORS ------------------------------------
-    "coop-unsafe-none": (
-        "present but effectively unsafe-none ({value}), which provides no "
-        "cross-origin isolation"
-    ),
+    "coop-unsafe-none": ("present but effectively unsafe-none ({value}), which provides no cross-origin isolation"),
     "coep-invalid": (
-        "present but has an unrecognised value ({value}); expected unsafe-none, "
-        "require-corp or credentialless"
+        "present but has an unrecognised value ({value}); expected unsafe-none, require-corp or credentialless"
     ),
     "coep-unsafe-none": (
         "present but set to unsafe-none, which is the default and embeds "
@@ -187,8 +160,7 @@ MESSAGES = {
         "document meant to be embedded, since COOP is inert in a frame"
     ),
     "corp-invalid": (
-        "present but has an unrecognised value ({value}); expected same-site, "
-        "same-origin or cross-origin"
+        "present but has an unrecognised value ({value}); expected same-site, same-origin or cross-origin"
     ),
     "corp-cross-origin": (
         "present but set to cross-origin, so it keeps no ordinary embedder "
@@ -252,24 +224,15 @@ MESSAGES = {
         "present but written in the older Feature-Policy syntax ({value}), "
         "which browsers cannot parse, so the whole header is ignored"
     ),
-    "pp-invalid": (
-        "present but {item} is not a feature=allowlist pair, so browsers "
-        "ignore the whole header"
-    ),
+    "pp-invalid": ("present but {item} is not a feature=allowlist pair, so browsers ignore the whole header"),
     "pp-empty": "present but sets no feature, so it restricts nothing",
-    "pp-wildcard": (
-        "present but allows {features} in every origin (*), including third "
-        "party frames the page embeds"
-    ),
+    "pp-wildcard": ("present but allows {features} in every origin (*), including third party frames the page embeds"),
     "fp-deprecated": (
         "present but superseded by Permissions-Policy, which uses a different "
         "syntax; only Chromium still honours this header"
     ),
     "fp-empty": "present but sets no feature, so it restricts nothing",
-    "fp-wildcard": (
-        "present but allows {features} in every origin (*), including third "
-        "party frames the page embeds"
-    ),
+    "fp-wildcard": ("present but allows {features} in every origin (*), including third party frames the page embeds"),
     "fp-conflicts": (
         "present alongside Permissions-Policy, and the two disagree about "
         "{features}; which one applies is an implementation detail, so the "
@@ -281,20 +244,12 @@ MESSAGES = {
         "frame-ancestors directive is the replacement"
     ),
     "xfo-invalid": (
-        "present but has an unrecognised value ({value}), so browsers ignore "
-        "it and the page stays framable"
+        "present but has an unrecognised value ({value}), so browsers ignore it and the page stays framable"
     ),
-    "xcto-invalid": (
-        "present but set to {value} rather than nosniff, so MIME type sniffing "
-        "stays enabled"
-    ),
-    "rp-invalid": (
-        "present but carries no recognised policy token ({value}), so the "
-        "browser default applies instead"
-    ),
+    "xcto-invalid": ("present but set to {value} rather than nosniff, so MIME type sniffing stays enabled"),
+    "rp-invalid": ("present but carries no recognised policy token ({value}), so the browser default applies instead"),
     "rp-unsafe-url": (
-        "present but set to unsafe-url, which leaks the full URL, query string "
-        "included, to third-party origins"
+        "present but set to unsafe-url, which leaks the full URL, query string included, to third-party origins"
     ),
     "ct-no-charset": (
         "present as {media_type} with no charset parameter, so the encoding is "
@@ -321,8 +276,7 @@ MESSAGES = {
         "tokens rather than quoted strings"
     ),
     "ip-no-blocked-destinations": (
-        "present but {detail}, so every script and stylesheet still loads "
-        "without integrity metadata"
+        "present but {detail}, so every script and stylesheet still loads without integrity metadata"
     ),
     "ip-sources-without-inline": (
         "present but sources is set to ({sources}) and does not include "
@@ -389,8 +343,7 @@ MESSAGES = {
     # -- the obsolete headers -----------------------------------------------
     "ect-deprecated": "present but deprecated since June 2021",
     "p3p-deprecated": (
-        "present but P3P was only ever read by Internet Explorer, which is "
-        "retired, and the specification was abandoned"
+        "present but P3P was only ever read by Internet Explorer, which is retired, and the specification was abandoned"
     ),
     "xdo-deprecated": (
         "present but only Internet Explorer read it, to stop a download being "
@@ -402,16 +355,13 @@ MESSAGES = {
         "site for the lifetime of the policy"
     ),
     "hpkp-ro-deprecated": (
-        "present but every browser has removed key pinning, so nothing is "
-        "measured and nothing is reported"
+        "present but every browser has removed key pinning, so nothing is measured and nothing is reported"
     ),
     "xcsp-deprecated": (
-        "present but no browser has read this header since Firefox 23; if it "
-        "is the only policy sent, the page has none"
+        "present but no browser has read this header since Firefox 23; if it is the only policy sent, the page has none"
     ),
     "xwkcsp-deprecated": (
-        "present but no browser has read this header since Chrome 25; if it is "
-        "the only policy sent, the page has none"
+        "present but no browser has read this header since Chrome 25; if it is the only policy sent, the page has none"
     ),
     "xdpc-nonstandard": (
         "present but no specification defines it: browser testing finds DNS "
@@ -428,26 +378,17 @@ MESSAGES = {
         "cross-domain policy, including whatever a user can upload"
     ),
     "xpcdp-policy-file": (
-        "present and set to {value}, which leaves cross-domain access to the "
-        "policy file; check crossdomain.xml"
+        "present and set to {value}, which leaves cross-domain access to the policy file; check crossdomain.xml"
     ),
-    "xpcdp-invalid": (
-        "present but has an unrecognised value ({value}), so clients fall back "
-        "to their default policy"
-    ),
+    "xpcdp-invalid": ("present but has an unrecognised value ({value}), so clients fall back to their default policy"),
     "xxp-deprecated": "present but disabled",
     "xxp-enabled": (
-        "present and enabled, which in some cases can create XSS "
-        "vulnerabilities in otherwise safe websites"
+        "present and enabled, which in some cases can create XSS vulnerabilities in otherwise safe websites"
     ),
     "xxp-blocked": (
-        "present and enabled in blocked mode, which may lead to side channel "
-        "attacks on iframe embeddable websites"
+        "present and enabled in blocked mode, which may lead to side channel attacks on iframe embeddable websites"
     ),
-    "xxp-invalid": (
-        "present but has an unrecognised value ({value}), expected '0', '1' or "
-        "'1; mode=block'"
-    ),
+    "xxp-invalid": ("present but has an unrecognised value ({value}), expected '0', '1' or '1; mode=block'"),
     # -- Set-Cookie -----------------------------------------------------------
     "cookie-control-character": (
         "{cookie} contains a control character, so browsers discard the whole "
@@ -472,8 +413,7 @@ MESSAGES = {
         "trustworthy origin, so the cookie is not stored at all"
     ),
     "cookie-partitioned-insecure": (
-        "{cookie} sets Partitioned without Secure, so the partitioning "
-        "attribute is rejected"
+        "{cookie} sets Partitioned without Secure, so the partitioning attribute is rejected"
     ),
     "cookie-prefix-violated": (
         "{cookie} carries the {prefix} prefix but does not meet its "
@@ -485,37 +425,22 @@ MESSAGES = {
         "that never met the prefix rules"
     ),
     "cookie-domain-mismatch": (
-        "{cookie} sets Domain={domain}, which is not {host} nor a parent of "
-        "it, so browsers reject the cookie"
+        "{cookie} sets Domain={domain}, which is not {host} nor a parent of it, so browsers reject the cookie"
     ),
     "cookie-no-secure": (
-        "{cookie} has no Secure attribute, so the browser will send it over "
-        "plaintext HTTP to this host"
+        "{cookie} has no Secure attribute, so the browser will send it over plaintext HTTP to this host"
     ),
-    "cookie-no-httponly": (
-        "{cookie} has no HttpOnly attribute, so scripts running in the page "
-        "can read it"
-    ),
+    "cookie-no-httponly": ("{cookie} has no HttpOnly attribute, so scripts running in the page can read it"),
     "cookie-no-samesite": (
         "{cookie} has no SameSite attribute; Chrome defaults it to Lax, while "
         "Firefox and Safari send it on cross-site requests"
     ),
     "cookie-samesite-none": (
-        "{cookie} sets SameSite=None, so it is sent on cross-site requests to "
-        "this host by design"
+        "{cookie} sets SameSite=None, so it is sent on cross-site requests to this host by design"
     ),
-    "cookie-persistent": (
-        "{cookie} sets an expiry, so it is written to disk and outlives the "
-        "browser session"
-    ),
-    "cookie-domain-broad": (
-        "{cookie} sets Domain={domain}, so every subdomain of it receives the "
-        "cookie"
-    ),
-    "cookie-unknown-attribute": (
-        "{cookie} sets the attribute {attribute}, which no browser "
-        "recognises{detail}"
-    ),
+    "cookie-persistent": ("{cookie} sets an expiry, so it is written to disk and outlives the browser session"),
+    "cookie-domain-broad": ("{cookie} sets Domain={domain}, so every subdomain of it receives the cookie"),
+    "cookie-unknown-attribute": ("{cookie} sets the attribute {attribute}, which no browser recognises{detail}"),
 }
 
 
@@ -527,11 +452,7 @@ def _scheme_pairs(data):
     # The pairing is what makes this readable -- a scheme is a defect in the
     # directive that lists it, not on its own -- so the data keeps them
     # together and only the sentence flattens them.
-    return {
-        "schemes": ", ".join(
-            "%s in %s" % (item["scheme"], item["directive"]) for item in data["schemes"]
-        )
-    }
+    return {"schemes": ", ".join("%s in %s" % (item["scheme"], item["directive"]) for item in data["schemes"])}
 
 
 def _hsts_problem(data):
@@ -548,20 +469,14 @@ def _hsts_unmet(data):
     if "include-subdomains" in data["unmet"]:
         unmet.append("includeSubDomains")
     if "max-age" in data["unmet"]:
-        unmet.append(
-            "a max-age of at least %d (one year) rather than %d"
-            % (data["minimum"], data["max_age"])
-        )
+        unmet.append("a max-age of at least %d (one year) rather than %d" % (data["minimum"], data["max_age"]))
     return {"unmet": " and ".join(unmet)}
 
 
 def _ip_detail(data):
     if not data["destinations"]:
         return {"detail": "names no destination to block"}
-    return {
-        "detail": "names only %s, which no engine blocks on"
-        % ", ".join(data["destinations"])
-    }
+    return {"detail": "names only %s, which no engine blocks on" % ", ".join(data["destinations"])}
 
 
 def _ip_sources(data):
@@ -601,10 +516,7 @@ def _samesite_invalid(data):
     """
     fields = _cookie_subject(data)
     value = data.get("value")
-    fields["setting"] = (
-        "sets SameSite=%s" % value if value is not None
-        else "sets SameSite as a flag with no value"
-    )
+    fields["setting"] = "sets SameSite=%s" % value if value is not None else "sets SameSite as a flag with no value"
     return fields
 
 
@@ -617,9 +529,7 @@ def _unknown_attribute(data):
     fields = _cookie_subject(data)
     suspected = data.get("suspected")
     fields["attribute"] = data["attribute"]
-    fields["detail"] = (
-        " and may be a misspelling of %s" % suspected if suspected else ""
-    )
+    fields["detail"] = " and may be a misspelling of %s" % suspected if suspected else ""
     return fields
 
 

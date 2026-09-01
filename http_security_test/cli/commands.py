@@ -159,8 +159,7 @@ def do_scan(args, source=None):
     print(scope.banner(patterns, not args.scope), file=sys.stderr)
     for stray in scope.looks_shell_expanded(args.scope):
         print(
-            "warning: --scope %s names a file -- quote the pattern so the shell "
-            "does not expand it" % stray,
+            "warning: --scope %s names a file -- quote the pattern so the shell does not expand it" % stray,
             file=sys.stderr,
         )
     if hstspreload is None:

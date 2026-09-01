@@ -51,9 +51,7 @@ def _paint(body, level, color):
 
 
 def _counted(counts):
-    return ", ".join(
-        "%d %s" % (counts[level], level) for level in reversed(LEVELS) if counts[level]
-    )
+    return ", ".join("%d %s" % (counts[level], level) for level in reversed(LEVELS) if counts[level])
 
 
 def _header_lines(result, color):
@@ -62,10 +60,7 @@ def _header_lines(result, color):
 
 
 def _source_lines(source):
-    lines = [
-        "    %s %s   %s"
-        % (source.get("status", ""), source.get("reason", ""), source["url"])
-    ]
+    lines = ["    %s %s   %s" % (source.get("status", ""), source.get("reason", ""), source["url"])]
     for hop in source.get("hops", []):
         arrow = "->" if hop["followed"] else "-X"
         line = "    %s %s %s %s" % (hop["from"], hop["code"], arrow, hop["to"])
@@ -77,9 +72,7 @@ def _source_lines(source):
 
 def _finding_lines(report, color, codes, min_level):
     floor = LEVELS.index(min_level)
-    findings = [
-        f for f in report["response"]["findings"] if LEVELS.index(f["level"]) >= floor
-    ]
+    findings = [f for f in report["response"]["findings"] if LEVELS.index(f["level"]) >= floor]
     if not findings:
         return ["findings: none", ""]
     counts = collections.Counter(f["level"] for f in findings)
@@ -93,15 +86,9 @@ def _finding_lines(report, color, codes, min_level):
         # the slugs are short enough not to crowd it.
         slugs = finding.get("consequences") or []
         suffix = "  [%s]" % ", ".join(slugs) if slugs else ""
-        lines.append(
-            "  %s %-34s %s%s"
-            % (level, finding["header"], finding.get("message", finding["code"]), suffix)
-        )
+        lines.append("  %s %-34s %s%s" % (level, finding["header"], finding.get("message", finding["code"]), suffix))
         if codes:
-            lines.append(
-                "           %s %s"
-                % (finding["code"], json.dumps(finding.get("data", {})))
-            )
+            lines.append("           %s %s" % (finding["code"], json.dumps(finding.get("data", {}))))
     lines.append("")
     return lines
 
@@ -170,11 +157,7 @@ def _summary_lines(document):
         # the other way round) and made the declared order a dead letter.
         lines.append(
             "    failures: %s"
-            % ", ".join(
-                "%d %s" % (failures[kind], kind)
-                for kind in outcome.FAILURE_KINDS
-                if failures[kind]
-            )
+            % ", ".join("%d %s" % (failures[kind], kind) for kind in outcome.FAILURE_KINDS if failures[kind])
         )
     lines.append("")
     return lines

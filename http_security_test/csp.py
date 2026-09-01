@@ -179,15 +179,11 @@ CSP_DIRECTIVES = frozenset(
 # Directives whose values are source expressions. The rest -- sandbox,
 # reflected-xss, trusted-types, report-to -- take bare tokens of their own, so
 # keyword syntax does not apply to them.
-CSP_SOURCE_DIRECTIVES = FETCH_DIRECTIVES | frozenset(
-    ["base-uri", "form-action", "frame-ancestors", "navigate-to"]
-)
+CSP_SOURCE_DIRECTIVES = FETCH_DIRECTIVES | frozenset(["base-uri", "form-action", "frame-ancestors", "navigate-to"])
 
 
 # Directives dropped from the standard: browsers parse them and do nothing.
-CSP_DEPRECATED_DIRECTIVES = frozenset(
-    ["disown-opener", "plugin-types", "reflected-xss", "referrer"]
-)
+CSP_DEPRECATED_DIRECTIVES = frozenset(["disown-opener", "plugin-types", "reflected-xss", "referrer"])
 
 
 # Where a source expression decides whether injected script gets to run.
@@ -234,9 +230,7 @@ CSP_KEYWORDS_UNQUOTED = frozenset(k.strip("'") for k in CSP_KEYWORDS)
 CSP_MIN_NONCE_LENGTH = 8
 
 
-CSP_NONCE_CHARSET = frozenset(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/_-="
-)
+CSP_NONCE_CHARSET = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/_-=")
 
 
 def _csp_host(source):
@@ -266,12 +260,7 @@ def _analyze_syntax(directives):
     # A directive name sitting in a value list means a semicolon was forgotten,
     # which silently demotes that directive to a hostname nobody will ever serve.
     stray = sorted(
-        {
-            source.lower()
-            for sources in directives.values()
-            for source in sources
-            if source.lower() in CSP_DIRECTIVES
-        }
+        {source.lower() for sources in directives.values() for source in sources if source.lower() in CSP_DIRECTIVES}
     )
     if stray:
         findings.append(
@@ -315,20 +304,9 @@ def _analyze_syntax(directives):
         }
     )
     if invalid:
-        findings.append(
-            Finding(
-                "Content-Security-Policy", "csp-invalid-keyword", {"sources": invalid}
-            )
-        )
+        findings.append(Finding("Content-Security-Policy", "csp-invalid-keyword", {"sources": invalid}))
 
-    weak = sorted(
-        {
-            source
-            for sources in directives.values()
-            for source in sources
-            if _is_weak_nonce(source)
-        }
-    )
+    weak = sorted({source for sources in directives.values() for source in sources if _is_weak_nonce(source)})
     if weak:
         findings.append(
             Finding(
@@ -378,16 +356,12 @@ def _analyze_csp(value):
                 if name not in directives:
                     continue
                 sources = directives[name]
-                if _has_keyword(
-                    sources, "'unsafe-inline'"
-                ) and not _ignores_unsafe_inline(sources, script):
+                if _has_keyword(sources, "'unsafe-inline'") and not _ignores_unsafe_inline(sources, script):
                     offenders.add(name)
                 break
         return sorted(offenders)
 
-    inline_script = _inline_offenders(
-        ("script-src-elem", "script-src-attr"), script=True
-    )
+    inline_script = _inline_offenders(("script-src-elem", "script-src-attr"), script=True)
     if inline_script:
         findings.append(
             Finding(
@@ -414,24 +388,16 @@ def _analyze_csp(value):
         findings.append(Finding("Content-Security-Policy", "csp-no-default-src"))
 
     wildcarded = sorted(
-        name
-        for name, sources in directives.items()
-        if name in FETCH_DIRECTIVES and any(s == "*" for s in sources)
+        name for name, sources in directives.items() if name in FETCH_DIRECTIVES and any(s == "*" for s in sources)
     )
     if wildcarded:
-        findings.append(
-            Finding(
-                "Content-Security-Policy", "csp-wildcard", {"directives": wildcarded}
-            )
-        )
+        findings.append(Finding("Content-Security-Policy", "csp-wildcard", {"directives": wildcarded}))
 
     frame_ancestors = directives.get("frame-ancestors")
     if frame_ancestors is None:
         findings.append(Finding("Content-Security-Policy", "csp-no-frame-ancestors"))
     elif "*" in frame_ancestors:
-        findings.append(
-            Finding("Content-Security-Policy", "csp-frame-ancestors-wildcard")
-        )
+        findings.append(Finding("Content-Security-Policy", "csp-frame-ancestors-wildcard"))
 
     if "object-src" not in directives and "default-src" not in directives:
         findings.append(Finding("Content-Security-Policy", "csp-no-object-src"))
@@ -449,41 +415,23 @@ def _analyze_csp(value):
             sources = directives[candidate]
             # 'strict-dynamic' makes the allowlist inert, and pairing it with a
             # scheme is the documented fallback for browsers that lack it.
-            if not (
-                name.startswith("script-") and _ignores_unsafe_inline(sources, True)
-            ):
-                schemed.update(
-                    (candidate, source.lower())
-                    for source in sources
-                    if source.lower() in CSP_XSS_SCHEMES
-                )
+            if not (name.startswith("script-") and _ignores_unsafe_inline(sources, True)):
+                schemed.update((candidate, source.lower()) for source in sources if source.lower() in CSP_XSS_SCHEMES)
             break
     if schemed:
         findings.append(
             Finding(
                 "Content-Security-Policy",
                 "csp-plain-scheme",
-                {
-                    "schemes": [
-                        {"directive": name, "scheme": scheme}
-                        for name, scheme in sorted(schemed)
-                    ]
-                },
+                {"schemes": [{"directive": name, "scheme": scheme} for name, scheme in sorted(schemed)]},
             )
         )
 
     insecure = sorted(
-        {
-            source
-            for sources in directives.values()
-            for source in sources
-            if source.lower().startswith("http://")
-        }
+        {source for sources in directives.values() for source in sources if source.lower().startswith("http://")}
     )
     if insecure:
-        findings.append(
-            Finding("Content-Security-Policy", "csp-http-source", {"sources": insecure})
-        )
+        findings.append(Finding("Content-Security-Policy", "csp-http-source", {"sources": insecure}))
 
     addresses = sorted(
         {
@@ -494,11 +442,7 @@ def _analyze_csp(value):
         }
     )
     if addresses:
-        findings.append(
-            Finding(
-                "Content-Security-Policy", "csp-ip-source", {"addresses": addresses}
-            )
-        )
+        findings.append(Finding("Content-Security-Policy", "csp-ip-source", {"addresses": addresses}))
 
     findings.extend(_analyze_syntax(directives))
 

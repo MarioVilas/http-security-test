@@ -1,4 +1,5 @@
 extend-exclude = ["*.md"]
+line-length = 120
 
 [lint]
 ignore = ["BLE001", "SIM115", "RUF012", "UP031"]

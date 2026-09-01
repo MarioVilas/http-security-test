@@ -61,9 +61,7 @@ def _analyze_hsts(value):
     directives = _parse_directives(value)
 
     if directives.get("max-age") is None:
-        return [
-            Finding("Strict-Transport-Security", "hsts-malformed", {"max_age": None})
-        ]
+        return [Finding("Strict-Transport-Security", "hsts-malformed", {"max_age": None})]
     try:
         max_age = int(directives["max-age"])
     except ValueError:
@@ -88,9 +86,7 @@ def _analyze_hsts(value):
         )
 
     if "includesubdomains" not in directives:
-        findings.append(
-            Finding("Strict-Transport-Security", "hsts-no-include-subdomains")
-        )
+        findings.append(Finding("Strict-Transport-Security", "hsts-no-include-subdomains"))
 
     # The preload directive is a submission to a list browsers ship, and the
     # list has entry requirements. Failing them means the token does nothing

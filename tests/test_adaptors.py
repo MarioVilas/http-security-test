@@ -139,14 +139,17 @@ class FakeHttpxHeaders:
         return iter(self._pairs)
 
 
-@pytest.mark.parametrize("value,expected", [
-    (11, "HTTP/1.1"),
-    (10, "HTTP/1.0"),
-    ("HTTP/1.1", "HTTP/1.1"),
-    ("HTTP/2", "HTTP/2"),
-    (types.SimpleNamespace(major=1, minor=1), "HTTP/1.1"),
-    (None, None),
-])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (11, "HTTP/1.1"),
+        (10, "HTTP/1.0"),
+        ("HTTP/1.1", "HTTP/1.1"),
+        ("HTTP/2", "HTTP/2"),
+        (types.SimpleNamespace(major=1, minor=1), "HTTP/1.1"),
+        (None, None),
+    ],
+)
 def test_http_version_normalises_every_encoding_we_found(value, expected):
     assert adaptors.http_version(value) == expected
 
@@ -183,12 +186,15 @@ def test_from_requests_reads_raw_headers_not_headers():
         headers=FakeCaseInsensitiveDict({"Content-Security-Policy": "a, b"}),
         raw=types.SimpleNamespace(version=11, headers=FakeHeaderDict(PAIRS)),
         request=types.SimpleNamespace(
-            method="GET", url="https://example.com/",
-            headers=FakeCaseInsensitiveDict({"Accept": "*/*"})),
+            method="GET",
+            url="https://example.com/",
+            headers=FakeCaseInsensitiveDict({"Accept": "*/*"}),
+        ),
     )
     request, response = adaptors.from_requests(fake)
     assert mapping(response.headers)["content-security-policy"] == [
-        "default-src 'self'", "script-src 'none'"
+        "default-src 'self'",
+        "script-src 'none'",
     ]
     assert response.version == "HTTP/1.1"
     assert request.url == "https://example.com/"
@@ -220,12 +226,15 @@ def test_from_scapy_ignores_the_model_and_parses_the_bytes():
     # scapy is the inverse of every other library: byte-identical round trip,
     # but its named fields return the LAST of two repeated headers. The only
     # correct adaptor takes raw(pkt) and comes through from_bytes().
-    raw = (b"HTTP/1.1 200 OK\r\n"
-           b"Content-Security-Policy: default-src 'self'\r\n"
-           b"Content-Security-Policy: script-src 'none'\r\n\r\n")
+    raw = (
+        b"HTTP/1.1 200 OK\r\n"
+        b"Content-Security-Policy: default-src 'self'\r\n"
+        b"Content-Security-Policy: script-src 'none'\r\n\r\n"
+    )
     response = adaptors.from_scapy_bytes(raw)
     assert mapping(response.headers)["content-security-policy"] == [
-        "default-src 'self'", "script-src 'none'"
+        "default-src 'self'",
+        "script-src 'none'",
     ]
     assert response.fidelity == "capture"
 
@@ -275,14 +284,11 @@ def test_from_httpx_never_invents_a_reason_phrase_for_http2():
         http_version = "HTTP/2"
         extensions = {}  # h2: the transport supplied no reason phrase at all
         headers = FakeHttpxHeaders(PAIRS)
-        request = types.SimpleNamespace(
-            url="https://example.com/", method="GET",
-            headers=FakeHttpxHeaders([]))
+        request = types.SimpleNamespace(url="https://example.com/", method="GET", headers=FakeHttpxHeaders([]))
 
         @property
         def reason_phrase(self):
-            raise AssertionError(
-                "adaptor read the inventing .reason_phrase property")
+            raise AssertionError("adaptor read the inventing .reason_phrase property")
 
     _, response = adaptors.from_httpx(NoInventingReasonPhrase())
     assert response.reason is None
@@ -298,14 +304,13 @@ def test_from_httpx_decodes_a_real_reason_phrase_from_extensions():
         http_version="HTTP/1.1",
         extensions={"reason_phrase": b"Not Found"},
         headers=FakeHttpxHeaders(PAIRS),
-        request=types.SimpleNamespace(
-            url="https://example.com/", method="GET",
-            headers=FakeHttpxHeaders([])),
+        request=types.SimpleNamespace(url="https://example.com/", method="GET", headers=FakeHttpxHeaders([])),
     )
     _, response = adaptors.from_httpx(fake)
     assert response.reason == "Not Found"
     assert mapping(response.headers)["content-security-policy"] == [
-        "default-src 'self'", "script-src 'none'"
+        "default-src 'self'",
+        "script-src 'none'",
     ]
 
 
@@ -329,11 +334,10 @@ def test_from_geventhttpclient_bypasses_pairs_and_keeps_duplicates():
 
     response = adaptors.from_geventhttpclient(FakeGeventHTTPResponse())
     assert mapping(response.headers)["content-security-policy"] == [
-        "default-src 'self'", "script-src 'none'"
+        "default-src 'self'",
+        "script-src 'none'",
     ]
-    assert mapping(response.headers)["set-cookie"] == [
-        "a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT"
-    ]
+    assert mapping(response.headers)["set-cookie"] == ["a=1; Expires=Wed, 21 Oct 2026 07:28:00 GMT"]
     assert response.status == 200
     assert response.reason == "OK"
     assert response.version == "HTTP/1.1"

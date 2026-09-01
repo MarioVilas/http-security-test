@@ -36,8 +36,10 @@ def parse(argv):
 # fixture -- over https it raises hsts-missing, which is an error.
 HARDENED = [
     ("Strict-Transport-Security", "max-age=31536000; includeSubDomains"),
-    ("Content-Security-Policy",
-     "default-src 'none'; base-uri 'none'; frame-ancestors 'none'"),
+    (
+        "Content-Security-Policy",
+        "default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    ),
     ("X-Content-Type-Options", "nosniff"),
     ("Referrer-Policy", "no-referrer"),
     ("Cross-Origin-Opener-Policy", "same-origin"),
@@ -63,12 +65,19 @@ def ok(target, url=None, status=200, pairs=None, hops=()):
     # both carry no raw bytes and no fidelity -- ordinary, uncaptured fixtures.
     real_url = url or (target if "://" in target else "https://%s/" % target)
     facts = outcome.Run(
-        kind="live", target=target, url=real_url, status=status, reason="OK", hops=hops,
+        kind="live",
+        target=target,
+        url=real_url,
+        status=status,
+        reason="OK",
+        hops=hops,
     )
     ex = Exchange(
         Request.from_parts(url=real_url),
         Response.from_parts(
-            status=status, reason="OK", headers=list(HARDENED if pairs is None else pairs)
+            status=status,
+            reason="OK",
+            headers=list(HARDENED if pairs is None else pairs),
         ),
     )
     return facts, ex
@@ -88,9 +97,7 @@ def source_of(*items):
 
 
 def test_a_clean_run_exits_zero(capsys):
-    code = commands.do_scan(
-        parse(["scan", "https://a.test/"]), source=source_of(ok("https://a.test/"))
-    )
+    code = commands.do_scan(parse(["scan", "https://a.test/"]), source=source_of(ok("https://a.test/")))
     assert code == 0
     assert "a.test" in capsys.readouterr().out
 
@@ -106,9 +113,7 @@ def test_findings_alone_do_not_change_the_exit_code(capsys):
 
 def test_fail_on_error_exits_one_when_an_error_finding_is_present(capsys):
     item = ok("https://a.test/", pairs=ERRORS)
-    code = commands.do_scan(
-        parse(["scan", "--fail-on", "error", "https://a.test/"]), source=source_of(item)
-    )
+    code = commands.do_scan(parse(["scan", "--fail-on", "error", "https://a.test/"]), source=source_of(item))
     capsys.readouterr()
     assert code == 1
 
@@ -154,9 +159,7 @@ def test_the_scope_banner_prints_before_anything_else(capsys):
     # The scope line is diagnostic, not report: it goes to stderr, ungated by
     # whether the terminal report itself is shown, per the spec's "diagnostics,
     # the preload note and per-target failures all go to stderr."
-    commands.do_scan(
-        parse(["scan", "https://a.test/"]), source=source_of(ok("https://a.test/"))
-    )
+    commands.do_scan(parse(["scan", "https://a.test/"]), source=source_of(ok("https://a.test/")))
     first = capsys.readouterr().err.splitlines()[0]
     assert first.startswith("scope:")
     assert "derived from targets" in first
@@ -172,7 +175,8 @@ def test_an_explicit_scope_is_not_labelled_derived(capsys):
 
 def test_json_to_stdout_suppresses_the_terminal_report(capsys):
     commands.do_scan(
-        parse(["scan", "-j", "https://a.test/"]), source=source_of(ok("https://a.test/"))
+        parse(["scan", "-j", "https://a.test/"]),
+        source=source_of(ok("https://a.test/")),
     )
     out = capsys.readouterr().out
     document = json.loads(out)  # the whole of stdout must be one JSON document
@@ -187,7 +191,8 @@ def test_the_scope_banner_still_prints_with_j(capsys):
     # gated by the same `show` flag that -j turns off. It must survive on
     # stderr while stdout stays one parseable JSON document.
     commands.do_scan(
-        parse(["scan", "-j", "https://a.test/"]), source=source_of(ok("https://a.test/"))
+        parse(["scan", "-j", "https://a.test/"]),
+        source=source_of(ok("https://a.test/")),
     )
     captured = capsys.readouterr()
     assert captured.err.splitlines()[0].startswith("scope:")
@@ -233,7 +238,8 @@ def test_oA_without_a_space_degrades_to_a_loud_usage_error(capsys):
     # argparse reads `-oArun` as `-o Arun`; format resolution then rejects it.
     # Loud, not silent, which is the acceptable outcome -- pinned so it stays so.
     code = commands.do_scan(
-        parse(["scan", "-oArun", "https://a.test/"]), source=source_of(ok("https://a.test/"))
+        parse(["scan", "-oArun", "https://a.test/"]),
+        source=source_of(ok("https://a.test/")),
     )
     assert code == 2
     assert "Arun" in capsys.readouterr().err
@@ -244,8 +250,13 @@ def test_min_level_filters_the_terminal_but_not_the_file(tmp_path, capsys):
     commands.do_scan(
         parse(
             [
-                "scan", "--min-level", "error", "-q",
-                "-o", "json:%s" % path, "https://a.test/",
+                "scan",
+                "--min-level",
+                "error",
+                "-q",
+                "-o",
+                "json:%s" % path,
+                "https://a.test/",
             ]
         ),
         source=source_of(ok("https://a.test/", pairs=WARNS)),
@@ -334,9 +345,7 @@ def test_a_rate_limited_response_echoes_retry_after(capsys):
 
 
 def test_an_ordinary_response_says_nothing_about_retrying(capsys):
-    commands.do_scan(
-        parse(["scan", "https://a.test/"]), source=source_of(ok("https://a.test/"))
-    )
+    commands.do_scan(parse(["scan", "https://a.test/"]), source=source_of(ok("https://a.test/")))
     assert "Retry-After" not in capsys.readouterr().err
 
 
@@ -371,7 +380,8 @@ def test_the_ok_fixture_builds_a_well_formed_url_not_a_doubled_scheme(capsys):
     # "https://https://a.test//" from a `target` that was already a full URL,
     # and exchange.host() of that malformed URL returns "https", not "a.test".
     commands.do_scan(
-        parse(["scan", "-j", "https://a.test/"]), source=source_of(ok("https://a.test/"))
+        parse(["scan", "-j", "https://a.test/"]),
+        source=source_of(ok("https://a.test/")),
     )
     document = json.loads(capsys.readouterr().out)
     assert document["results"][0]["source"]["url"] == "https://a.test/"
@@ -391,9 +401,7 @@ def test_host_reaches_report_as_the_true_hostname(monkeypatch, capsys):
         return real_report(exchange, **kwargs)
 
     monkeypatch.setattr(commands, "report", spy)
-    commands.do_scan(
-        parse(["scan", "https://a.test/"]), source=source_of(ok("https://a.test/"))
-    )
+    commands.do_scan(parse(["scan", "https://a.test/"]), source=source_of(ok("https://a.test/")))
     capsys.readouterr()
     assert host(captured["url"]) == "a.test"
 

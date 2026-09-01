@@ -62,8 +62,7 @@ def test_fidelity_rides_beside_raw_and_is_absent_when_raw_is():
 def test_a_reconstruction_is_never_presented_as_a_capture():
     # from_parts has no wire bytes to offer, so it offers none rather than
     # reassembling them. Absent beats empty.
-    e = Exchange(Request.from_parts(url="https://example.com/"),
-                 Response.from_parts(status=200))
+    e = Exchange(Request.from_parts(url="https://example.com/"), Response.from_parts(status=200))
     assert "raw" not in headers.report(e)["response"]
 
 
@@ -81,8 +80,11 @@ def test_fidelity_is_not_validated_against_the_vocabulary():
 
 def test_the_request_side_carries_its_own_fidelity():
     e = Exchange(
-        Request.from_parts(url="https://example.com/", raw=b"GET / HTTP/1.1\r\n\r\n",
-                            fidelity="reconstructed"),
+        Request.from_parts(
+            url="https://example.com/",
+            raw=b"GET / HTTP/1.1\r\n\r\n",
+            fidelity="reconstructed",
+        ),
         Response.from_parts(status=200),
     )
     doc = headers.report(e)

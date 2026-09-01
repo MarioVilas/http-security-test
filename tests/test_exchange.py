@@ -82,8 +82,7 @@ def test_timestamp_and_connection_belong_to_the_exchange_not_a_message():
     # from Host: because Host: can be forged.
     e = _exchange(
         timestamp="2026-08-24T12:00:00Z",
-        connection=Connection(host="example.com", ip="93.184.216.34",
-                              port=443, scheme="https"),
+        connection=Connection(host="example.com", ip="93.184.216.34", port=443, scheme="https"),
     )
     assert e.timestamp == "2026-08-24T12:00:00Z"
     assert e.connection.ip == "93.184.216.34"

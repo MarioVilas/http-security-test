@@ -219,7 +219,7 @@ def strip_prefix(name):
     lowered = name.lower()
     for prefix in COOKIE_PREFIXES:
         if lowered.startswith(prefix):
-            return name[len(prefix):]
+            return name[len(prefix) :]
     return name
 
 
@@ -260,10 +260,8 @@ def osa_distance(a, b):
     for i in range(1, len(a) + 1):
         for j in range(1, len(b) + 1):
             cost = 0 if a[i - 1] == b[j - 1] else 1
-            rows[i][j] = min(rows[i - 1][j] + 1, rows[i][j - 1] + 1,
-                             rows[i - 1][j - 1] + cost)
-            if (i > 1 and j > 1
-                    and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]):
+            rows[i][j] = min(rows[i - 1][j] + 1, rows[i][j - 1] + 1, rows[i - 1][j - 1] + cost)
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
                 rows[i][j] = min(rows[i][j], rows[i - 2][j - 2] + 1)
     return rows[-1][-1]
 
@@ -431,13 +429,11 @@ def _analyze_one(cookie, trustworthy, host):
     name = cookie.name
 
     if _CONTROL.search(_OBS_FOLD.sub(" ", cookie.raw)):
-        findings.append(Finding("Set-Cookie", "cookie-control-character",
-                                {"cookie": name}))
+        findings.append(Finding("Set-Cookie", "cookie-control-character", {"cookie": name}))
 
     octets = _octets(name) + _octets(cookie.value)
     if octets > MAX_NAME_VALUE_OCTETS:
-        findings.append(Finding("Set-Cookie", "cookie-oversized",
-                                {"cookie": name, "octets": octets}))
+        findings.append(Finding("Set-Cookie", "cookie-oversized", {"cookie": name, "octets": octets}))
 
     if "samesite" in attributes:
         samesite = attributes["samesite"]
@@ -449,31 +445,29 @@ def _analyze_one(cookie, trustworthy, host):
             # code. Absent-beats-empty, and here it is load-bearing: a
             # placeholder value read back as `SameSite=(none)` quoted the
             # reader something the response never wrote.
-            findings.append(Finding("Set-Cookie", "cookie-samesite-invalid",
-                                    {"cookie": name}))
+            findings.append(Finding("Set-Cookie", "cookie-samesite-invalid", {"cookie": name}))
         elif samesite.lower() not in SAMESITE_VALUES:
-            findings.append(Finding("Set-Cookie", "cookie-samesite-invalid",
-                                    {"cookie": name, "value": samesite}))
+            findings.append(Finding("Set-Cookie", "cookie-samesite-invalid", {"cookie": name, "value": samesite}))
         elif samesite.lower() == "none" and not secure:
-            findings.append(Finding("Set-Cookie", "cookie-samesite-none-insecure",
-                                    {"cookie": name}))
+            findings.append(Finding("Set-Cookie", "cookie-samesite-none-insecure", {"cookie": name}))
 
     if secure and not trustworthy:
-        findings.append(Finding("Set-Cookie", "cookie-secure-over-plaintext",
-                                {"cookie": name}))
+        findings.append(Finding("Set-Cookie", "cookie-secure-over-plaintext", {"cookie": name}))
 
     if "partitioned" in attributes and not secure:
-        findings.append(Finding("Set-Cookie", "cookie-partitioned-insecure",
-                                {"cookie": name}))
+        findings.append(Finding("Set-Cookie", "cookie-partitioned-insecure", {"cookie": name}))
 
     prefix = _prefix_of(name)
     if prefix is not None:
         unmet = _unmet_prefix_requirements(cookie, prefix, trustworthy, host)
         if unmet:
-            findings.append(Finding("Set-Cookie", "cookie-prefix-violated",
-                                    {"cookie": name,
-                                     "prefix": _PREFIX_SPELLING[prefix],
-                                     "unmet": unmet}))
+            findings.append(
+                Finding(
+                    "Set-Cookie",
+                    "cookie-prefix-violated",
+                    {"cookie": name, "prefix": _PREFIX_SPELLING[prefix], "unmet": unmet},
+                )
+            )
 
     if not name:
         # No further stripping needed here: parse_set_cookie() already
@@ -482,14 +476,15 @@ def _analyze_one(cookie, trustworthy, host):
         # to trim a second time.
         hidden = _prefix_of(cookie.value)
         if hidden is not None:
-            findings.append(Finding("Set-Cookie", "cookie-hidden-prefix",
-                                    {"cookie": name,
-                                     "prefix": _PREFIX_SPELLING[hidden]}))
+            findings.append(
+                Finding("Set-Cookie", "cookie-hidden-prefix", {"cookie": name, "prefix": _PREFIX_SPELLING[hidden]})
+            )
 
     domain = attributes.get("domain")
     if domain and host and not _domain_matches(domain, host):
-        findings.append(Finding("Set-Cookie", "cookie-domain-mismatch",
-                                {"cookie": name, "domain": domain, "host": host}))
+        findings.append(
+            Finding("Set-Cookie", "cookie-domain-mismatch", {"cookie": name, "domain": domain, "host": host})
+        )
 
     absent = {a for a in TYPO_SENSITIVE_ATTRIBUTES if a not in attributes}
     for written in attributes:
@@ -586,8 +581,7 @@ def _inference_only(evidence):
     SameSite=Lax` raised two unrelated notes to warnings, so hardening a
     cookie made the tool louder about it.
     """
-    return [e for e in evidence
-            if not e.startswith("typo:") and e != "httponly-set"]
+    return [e for e in evidence if not e.startswith("typo:") and e != "httponly-set"]
 
 
 def _level_from(evidence):
@@ -711,9 +705,9 @@ def _hardening_findings(cookie, host, date=None):
         if attribute in attributes:
             continue
         evidence = evidence_for(cookie, attribute)
-        findings.append(Finding("Set-Cookie", code,
-                                {"cookie": cookie.name, "evidence": evidence},
-                                _level_from(evidence)))
+        findings.append(
+            Finding("Set-Cookie", code, {"cookie": cookie.name, "evidence": evidence}, _level_from(evidence))
+        )
 
     # Gated on Secure: once cookie-samesite-none-insecure has already said
     # Chrome and Firefox reject the cookie outright, a tier-2 fact about what
@@ -723,16 +717,22 @@ def _hardening_findings(cookie, host, date=None):
     samesite = attributes.get("samesite")
     if samesite is not None and samesite.lower() == "none" and secure:
         evidence = _inference_only(evidence_for(cookie, "samesite"))
-        findings.append(Finding("Set-Cookie", "cookie-samesite-none",
-                                {"cookie": cookie.name, "evidence": evidence},
-                                _level_from(evidence)))
+        findings.append(
+            Finding(
+                "Set-Cookie",
+                "cookie-samesite-none",
+                {"cookie": cookie.name, "evidence": evidence},
+                _level_from(evidence),
+            )
+        )
 
-    if (("expires" in attributes or "max-age" in attributes)
-            and not _exempts_persistence(attributes, date)):
+    if ("expires" in attributes or "max-age" in attributes) and not _exempts_persistence(attributes, date):
         evidence = _inference_only(evidence_for(cookie, "secure"))
-        findings.append(Finding("Set-Cookie", "cookie-persistent",
-                                {"cookie": cookie.name, "evidence": evidence},
-                                _level_from(evidence)))
+        findings.append(
+            Finding(
+                "Set-Cookie", "cookie-persistent", {"cookie": cookie.name, "evidence": evidence}, _level_from(evidence)
+            )
+        )
 
     # Gated on the domain actually matching the host, reusing the same
     # `_domain_matches` tier 1 already computes cookie-domain-mismatch from:
@@ -742,10 +742,14 @@ def _hardening_findings(cookie, host, date=None):
     domain = attributes.get("domain")
     if domain and host and _domain_matches(domain, host):
         evidence = _inference_only(evidence_for(cookie, "secure"))
-        findings.append(Finding("Set-Cookie", "cookie-domain-broad",
-                                {"cookie": cookie.name, "domain": domain,
-                                 "evidence": evidence},
-                                _level_from(evidence)))
+        findings.append(
+            Finding(
+                "Set-Cookie",
+                "cookie-domain-broad",
+                {"cookie": cookie.name, "domain": domain, "evidence": evidence},
+                _level_from(evidence),
+            )
+        )
     return findings
 
 
