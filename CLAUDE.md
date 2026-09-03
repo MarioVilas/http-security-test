@@ -1790,7 +1790,7 @@ the long-form descriptions to land with the SARIF writer's `fullDescription`
 field removed the only thing a verbosity switch would have gated — do not
 reserve one now.
 
-**Tests:** 889 passing across 511 test functions, 122 of them CLI. `ruff check`
+**Tests:** 891 passing across 513 test functions, 122 of them CLI. `ruff check`
 clean. No test touches the network, with one deliberate exception: the redirect-
 limit test binds a loopback `http.server` on an ephemeral port, because urllib's
 own redirect bookkeeping cannot be tested any other way.

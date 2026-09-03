@@ -564,24 +564,40 @@ def evidence_for(cookie, attribute):
     return evidence
 
 
-def _inference_only(evidence):
-    """`evidence` with everything that is not an inference about importance.
+def _matters(cookie):
+    """The signals that say a cookie is worth caring about, attribute-free.
 
-    `cookie-samesite-none`, `cookie-persistent` and `cookie-domain-broad` can
-    only ask one of the two questions `evidence_for()` answers. `typo:` and
-    `httponly-set` both answer the other one -- *did the author intend a
-    protection they did not get* -- and neither applies here: nothing was
-    misspelled, and nothing was forgotten either. The response asked for
-    cross-site sending, an expiry, or a parent domain, deliberately in each
-    case.
+    `evidence_for()` answers two questions at once: *did the author intend a
+    protection they did not get* (`typo:`, `httponly-set`) and *does this
+    cookie matter* (everything else). `cookie-samesite-none`,
+    `cookie-persistent` and `cookie-domain-broad` can only ask the second one:
+    nothing was misspelled and nothing was forgotten, because the response
+    asked for cross-site sending, an expiry or a parent domain deliberately in
+    each case.
 
-    Leaving `httponly-set` in inverted the ladder, which is why this is a
-    named helper and not a comprehension repeated three times: adding
-    `HttpOnly` to `_ga=x; Domain=.example.com; Max-Age=63072000; Secure;
-    SameSite=Lax` raised two unrelated notes to warnings, so hardening a
-    cookie made the tool louder about it.
+    Those three used to get their answer by calling
+    `evidence_for(cookie, "secure")` -- or `"samesite"` for the first -- and
+    filtering the other question's signals back out. That returned the right
+    list for the wrong reason, and left a reader tracing why domain breadth
+    consults the `Secure` row with no answer, because there is none: the
+    attribute was a borrowed call site, not a decision. The signals below are
+    exactly what survived that filter, in the same order.
+
+    `httponly-set` is deliberately absent rather than filtered. Including it
+    inverted the ladder: adding `HttpOnly` to `_ga=x; Domain=.example.com;
+    Max-Age=63072000; Secure; SameSite=Lax` raised two unrelated notes to
+    warnings, so hardening a cookie made the tool louder about it. Here it
+    cannot come back by accident, because nothing reads an attribute at all.
     """
-    return [e for e in evidence if not e.startswith("typo:") and e != "httponly-set"]
+    name = cookie.name
+    evidence = []
+    if is_session_name(name):
+        evidence.append("session-name")
+    if _prefix_of(name) is not None:
+        evidence.append("prefix")
+    if any(fragment in name.lower() for fragment in CSRF_FRAGMENTS):
+        evidence.append("csrf-name")
+    return evidence
 
 
 def _level_from(evidence):
@@ -716,7 +732,7 @@ def _hardening_findings(cookie, host, date=None):
     # cross-site in cleartext regardless -- is already in that tier-1 message.
     samesite = attributes.get("samesite")
     if samesite is not None and samesite.lower() == "none" and secure:
-        evidence = _inference_only(evidence_for(cookie, "samesite"))
+        evidence = _matters(cookie)
         findings.append(
             Finding(
                 "Set-Cookie",
@@ -727,7 +743,7 @@ def _hardening_findings(cookie, host, date=None):
         )
 
     if ("expires" in attributes or "max-age" in attributes) and not _exempts_persistence(attributes, date):
-        evidence = _inference_only(evidence_for(cookie, "secure"))
+        evidence = _matters(cookie)
         findings.append(
             Finding(
                 "Set-Cookie", "cookie-persistent", {"cookie": cookie.name, "evidence": evidence}, _level_from(evidence)
@@ -741,7 +757,7 @@ def _hardening_findings(cookie, host, date=None):
     # meaningless for the same response.
     domain = attributes.get("domain")
     if domain and host and _domain_matches(domain, host):
-        evidence = _inference_only(evidence_for(cookie, "secure"))
+        evidence = _matters(cookie)
         findings.append(
             Finding(
                 "Set-Cookie",

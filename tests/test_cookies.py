@@ -645,6 +645,52 @@ def test_a_misspelling_escalates_to_error_and_outranks_everything():
     assert "typo:secure" in finding.data["evidence"]
 
 
+def test_matters_is_evidence_for_without_the_intent_signals():
+    # `_matters()` replaced three call sites that asked
+    # `evidence_for(cookie, "secure")` -- or "samesite" -- and filtered the
+    # intent signals back out. The list was right; the attribute was a
+    # borrowed call site rather than a decision, so a reader tracing why
+    # domain breadth consulted the Secure row found no answer.
+    #
+    # Pinned as one test over a cross-product rather than a parametrize:
+    # 105 test functions for a single property would outnumber the tests for
+    # the sixteen codes. The assertion names the failing cookie itself.
+    names = ["lang", "sid", "PHPSESSID", "__Host-sid", "__Secure-sid",
+             "csrf_token", "XSRF-TOKEN", "__Host-csrf", "AWSALB", "_ga",
+             "remember_user_token", "wordpress_logged_in_abc", "", "nc_token",
+             "grafana_session"]
+    attrs = ["", "; Secure", "; HttpOnly", "; Secure; HttpOnly", "; Secrue",
+             "; HtppOnly; Secure",
+             "; Max-Age=99999; Domain=example.com; Secure; HttpOnly"]
+    for name in names:
+        for attr in attrs:
+            value = "%s=x%s" % (name, attr)
+            cookie = cookies.parse_set_cookie(value)
+            for attribute in ("secure", "samesite"):
+                # Either attribute's evidence, once the OTHER question's
+                # signals are removed, is what _matters() must return. Both
+                # directions, because either was a plausible spelling of the
+                # old code.
+                intent_free = [
+                    e for e in cookies.evidence_for(cookie, attribute)
+                    if not e.startswith("typo:") and e != "httponly-set"
+                ]
+                assert cookies._matters(cookie) == intent_free, (
+                    "%r via %s: %r != %r"
+                    % (value, attribute, cookies._matters(cookie), intent_free)
+                )
+
+
+def test_matters_reads_no_attribute_at_all():
+    # The structural claim, separate from the equivalence above: two cookies
+    # with the same name and completely different attributes must get the same
+    # answer, because "does this cookie matter" is a question about the name.
+    bare = cookies.parse_set_cookie("PHPSESSID=x")
+    loaded = cookies.parse_set_cookie(
+        "PHPSESSID=x; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=1; Domain=example.com")
+    assert cookies._matters(bare) == cookies._matters(loaded) == ["session-name"]
+
+
 def test_an_unescalated_finding_carries_empty_evidence():
     # Always present, [] included, the same rule as `data` itself.
     assert _find("lang=en; Secure; SameSite=Lax", "cookie-no-httponly").data["evidence"] == []
