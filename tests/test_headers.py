@@ -25,7 +25,7 @@ from unittest import mock
 import pytest
 
 import http_security_test as headers
-from http_security_test import hsts, message, policies, references, response
+from http_security_test import csp, hsts, message, policies, references, response
 from http_security_test.exchange import Exchange
 from http_security_test.message import Request, Response
 
@@ -665,6 +665,29 @@ def test_parse_csp_lowercases_directives_and_keeps_source_case():
 def test_parse_csp_keeps_the_first_of_a_repeated_directive():
     # CSP tells user agents to ignore repeats after the first
     assert headers.parse_csp("default-src 'self'; default-src *") == {"default-src": ["'self'"]}
+
+
+def test_split_policies_reads_one_header_value_as_several_policies():
+    # CSP3 defines the header value as a serialized-policy-list -- 1#serialized-policy
+    # -- so a comma separates whole policies, not sources within one.
+    assert headers.split_policies("default-src 'self', frame-ancestors 'none'") == [
+        "default-src 'self'",
+        "frame-ancestors 'none'",
+    ]
+
+
+def test_split_policies_returns_the_whole_value_when_there_is_no_comma():
+    assert headers.split_policies("default-src 'self'; base-uri 'none'") == ["default-src 'self'; base-uri 'none'"]
+
+
+def test_split_policies_ignores_empty_list_elements():
+    # RFC 9110 5.6.1.2: "Empty elements do not contribute to the count of
+    # elements present. A recipient MUST parse and ignore a reasonable number
+    # of empty list elements."
+    assert headers.split_policies("default-src 'self',, frame-ancestors 'none',") == [
+        "default-src 'self'",
+        "frame-ancestors 'none'",
+    ]
 
 
 def test_parse_permissions_policy_keeps_the_last_of_a_repeated_feature():
@@ -2593,6 +2616,89 @@ def csp_codes(*policies):
     )
 
 
+def csp_findings(*policies):
+    return [
+        f
+        for f in headers.analyze(_ex({"content-security-policy": list(policies)}))
+        if f.code.startswith("csp-")
+    ]
+
+
+# What a policy does NOT say is the third state the combiner has to know about.
+# A directive absent from a policy, with no default-src to fall back on, does
+# not restrict that resource type at all -- so a policy silent about script
+# permits inline script rather than blocking it, and reading silence as a block
+# suppresses weaknesses a browser would allow. `_sources()` returning None is
+# exactly that test, which is why no table of "default values" is needed: CSP
+# has no such thing, only the default-src fallback and then no restriction.
+
+
+def test_a_policy_silent_about_script_does_not_block_inline_script():
+    # policy 2 names no script directive and no default-src, so a browser
+    # still runs inline script: the weakness survives the intersection
+    assert "csp-unsafe-inline" in csp_codes("script-src 'unsafe-inline'", "img-src 'self'")
+
+
+def test_a_policy_that_really_restricts_script_still_suppresses_the_weakness():
+    # the guard on the test above: default-src 'none' DOES constrain script
+    permissive = "script-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"
+    assert "csp-unsafe-inline" not in csp_codes(permissive, AIRTIGHT)
+
+
+# The other half: a claim has to name what it is about, or two policies that
+# are permissive about different things read as agreeing about one thing.
+
+STRICT = "base-uri 'none'; frame-ancestors 'none'; object-src 'none'"
+
+
+def test_a_wildcard_each_policy_puts_in_a_different_directive_is_not_effective():
+    # script must satisfy both ('self' wins), and so must img: no wildcard
+    # survives the intersection, so reporting one is a false positive
+    a = "script-src *; img-src 'self'; " + STRICT
+    b = "script-src 'self'; img-src *; " + STRICT
+    assert "csp-wildcard" not in csp_codes(a, b)
+
+
+def test_a_wildcard_every_policy_permits_in_the_same_directive_is_effective():
+    a = "script-src *; img-src 'self'; " + STRICT
+    b = "script-src *; img-src 'self'; " + STRICT
+    wildcard = [f for f in csp_findings(a, b) if f.code == "csp-wildcard"]
+    assert [f.data["directives"] for f in wildcard] == [["script-src"]]
+
+
+def test_a_claim_a_sibling_policy_is_silent_about_survives():
+    # policy 1 says nothing about script, so its wildcard is effective too,
+    # and both directives belong in the surviving finding
+    a = "img-src *; " + STRICT
+    b = "img-src *; script-src *; " + STRICT
+    wildcard = [f for f in csp_findings(a, b) if f.code == "csp-wildcard"]
+    assert [sorted(f.data["directives"]) for f in wildcard] == [["img-src", "script-src"]]
+
+
+def test_every_combinable_csp_code_says_which_directive_it_is_about():
+    """The claim table's bijection with what the analyser can emit.
+
+    A code that is neither a syntax defect nor able to name its directive
+    cannot be intersected at all: the combiner would have to ask whether a
+    sibling policy constrains something the claim never identified.
+    """
+    for name, value, _ in ANALYZER_CASES:
+        if name.lower() != "content-security-policy":
+            continue
+        for finding in response._analyze_header(name, value):
+            if finding.code in csp.CSP_SYNTAX_CODES:
+                continue
+            # asked of the resolver rather than of one table, so a code that
+            # carries its directives under a key of its own still counts
+            named = csp._claim_directives(finding)
+            assert named, finding.code
+            assert set(named) <= csp.CSP_DIRECTIVES, (finding.code, named)
+
+
+def test_no_directive_is_declared_for_a_csp_code_that_cannot_be_emitted():
+    assert set(csp.CSP_CODE_DIRECTIVE) <= {f.code for f in _emitted()}
+
+
 def test_a_gap_one_policy_leaves_and_another_closes_is_not_a_gap():
     # each alone looks deficient; together they cover everything
     assert csp_codes(COVERS_DEFAULT) == ["csp-no-frame-ancestors"]
@@ -2621,6 +2727,91 @@ def test_a_syntax_defect_in_any_policy_is_real():
 def test_one_policy_is_still_judged_alone():
     assert csp_codes(AIRTIGHT) == []
     assert csp_codes("default-src 'self'") == ["csp-no-base-uri", "csp-no-frame-ancestors"]
+
+
+# One header line may carry several policies, comma-separated -- CSP3's
+# serialized-policy-list. Both engines split before parsing: Chromium's
+# ParseContentSecurityPolicies (services/network/public/cpp/
+# content_security_policy/content_security_policy.cc) walks SplitAndTrim(value,
+# ","), and Firefox's CSP_AppendCSPFromHeader (dom/security/nsCSPUtils.cpp)
+# tokenizes on ',' for the same stated reason. Reading the line as one policy
+# lands the next policy's directive name in the previous policy's source list.
+
+
+def test_a_comma_separated_policy_list_is_read_as_several_policies():
+    assert csp_codes("%s, %s" % (COVERS_DEFAULT, COVERS_FRAMING)) == []
+
+
+def test_a_joined_policy_list_says_what_the_same_policies_in_two_headers_say():
+    joined = "%s, %s" % (COVERS_DEFAULT, COVERS_FRAMING)
+    assert csp_codes(joined) == csp_codes(COVERS_DEFAULT, COVERS_FRAMING)
+
+
+def test_a_weakness_one_policy_of_a_joined_list_permits_is_not_effective():
+    # the same conjunctive rule as two headers: the strict policy still blocks it
+    permissive = "script-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"
+    assert "csp-unsafe-inline" not in csp_codes("%s, %s" % (permissive, AIRTIGHT))
+
+
+def test_a_joined_policy_list_does_not_invent_an_invalid_keyword():
+    # the shape forms.gle sends: 'self',script-src was read as one source
+    assert "csp-invalid-keyword" not in csp_codes("worker-src 'self',script-src 'none'")
+
+
+def test_a_joined_policy_list_does_not_invent_a_missing_semicolon():
+    # a comma IS the separator here, so nothing is missing
+    assert "csp-missing-semicolon" not in csp_codes("%s, %s" % (COVERS_DEFAULT, COVERS_FRAMING))
+
+
+def test_empty_policies_in_a_list_are_ignored():
+    assert csp_codes("%s,, %s," % (COVERS_DEFAULT, COVERS_FRAMING)) == []
+
+
+def test_a_header_naming_no_policy_at_all_still_reports_what_it_fails_to_cover():
+    # `Content-Security-Policy:` with nothing in it protects nothing, and
+    # csp-missing cannot fire because the header IS present. Reading the value
+    # as zero policies would leave a response carrying a useless CSP header and
+    # no finding of any kind, which is the one outcome worse than the misparse.
+    assert csp_codes("") == [
+        "csp-no-base-uri",
+        "csp-no-default-src",
+        "csp-no-frame-ancestors",
+        "csp-no-object-src",
+    ]
+
+
+def test_a_header_of_nothing_but_empty_elements_says_what_an_empty_one_says():
+    # and no csp-unknown-directive: a bare comma is a separator, not a directive
+    assert csp_codes(",") == csp_codes("")
+
+
+def test_a_comma_inside_a_report_uri_splits_the_way_a_browser_splits_it():
+    # NOT a false positive, however much it looks like one: both engines split
+    # on every comma at this layer, so a report-uri carrying one really does
+    # break the policy in a browser too, and the second half is not a directive.
+    assert "csp-unknown-directive" in csp_codes("default-src 'none'; report-uri /r?a=1,b=2")
+
+
+def test_frame_ancestors_in_a_later_policy_of_a_list_suppresses_missing_xfo():
+    # _frame_ancestors_covers() reads raw values of its own, so the split has
+    # to reach it too -- otherwise the sideways effect of the misparse survives.
+    assert framing_codes({"content-security-policy": "default-src 'none', frame-ancestors 'none'"}) == []
+
+
+def test_a_report_to_group_named_in_a_later_policy_of_a_list_is_seen():
+    # _csp_report_to_groups() is the other raw-value reader, and the misparse
+    # hides the group entirely rather than mangling it: no group is named, so
+    # nothing can be undefined and a policy reporting nowhere passes unnoticed.
+    present = {"content-security-policy": "default-src 'none', report-to csp"}
+    assert group_codes(present) == ["csp-report-to-undefined"]
+
+
+def test_a_report_to_group_defined_elsewhere_is_still_not_reported():
+    present = {
+        "content-security-policy": "default-src 'none', report-to csp",
+        "reporting-endpoints": 'csp="https://example.test/r"',
+    }
+    assert group_codes(present) == []
 
 
 def test_a_repeated_header_names_each_distinct_defect():

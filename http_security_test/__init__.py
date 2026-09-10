@@ -63,7 +63,7 @@ sit in a Burp extension or a CI job without dragging a tool along. Reach for
 """
 
 from .catalog import CONSEQUENCES, MESSAGES, Consequence, describe
-from .csp import parse_csp
+from .csp import parse_csp, split_policies
 from .exchange import Connection, Exchange
 from .findings import (
     CODE_CONSEQUENCES,
@@ -130,6 +130,7 @@ __all__ = [
     "parse_raw_headers",
     "report",
     "severity",
+    "split_policies",
     "taxonomy",
     "taxonomy_url",
 ]

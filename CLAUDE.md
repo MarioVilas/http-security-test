@@ -6,8 +6,7 @@ only the analyser survived, until `hst` was written against the analyser rather
 than tangled into it.
 
 **The engine is still library-only in the sense that matters: it never fetches
-anything.** Every network call lives in `cli/live.py`, `import
-http_security_test` pulls in no fetching code of ours, and a test pins that
+anything.** Every network call lives in `cli/live.py`, `import http_security_test` pulls in no fetching code of ours, and a test pins that
 nothing outside `cli/` names `cli`. Do not relax that direction — it is what
 lets the analyser be embedded in a Burp extension, a CI job or a notebook
 without dragging a tool along.
@@ -22,7 +21,7 @@ catalog.py     MESSAGES + describe(): every sentence the package can produce
 references.py  header and taxonomy URLs -- the only module whose exported data is a URL table
 message.py     Request, Response, the header mapping model: parse_headers, parse_raw_headers, mapping, lookups
 exchange.py    Exchange, Connection: one HTTP exchange, and the facts neither message carries
-csp.py         Content-Security-Policy                      (largest module)
+csp.py         Content-Security-Policy: split_policies() -> parse_csp() -> combiner (largest)
 hsts.py        Strict-Transport-Security + the ONLY third-party dependency
 isolation.py   COOP / COEP / CORP / CORS
 policies.py    Permissions-Policy + Feature-Policy
@@ -145,14 +144,14 @@ These were expensive to arrive at. Do not quietly reverse them.
    -- one defect can be worth more on one cookie than on another, and that is a
    rating rather than a different fact. `ESCALATABLE` names the codes that do
    this and `level_of()` resolves a finding's own level or its code's default.
-2. **Inventories are facts, findings are judgments.** Nothing is withheld from an
+1. **Inventories are facts, findings are judgments.** Nothing is withheld from an
    inventory because of what it contains. HSTS appears in a `missing` inventory on
    a plaintext target; the *finding* is what `secure=False` suppresses.
-3. **Severity rule.** `error` = the header does not deliver the protection its
+1. **Severity rule.** `error` = the header does not deliver the protection its
    presence implies (browsers ignore it, or it permits the very thing it exists to
    stop). `warning` = it protects, but a hardening directive is missing. `note` =
    a fact with no defect.
-4. **A false positive on a correct configuration is the worst outcome.** This
+1. **A false positive on a correct configuration is the worst outcome.** This
    project exists because the tool it forked called `default-src 'self'` unsafe by
    substring match. Two Criticals found in review were the same bug in new
    clothes (`require-corp; report-to="…"` read as invalid; the nonce +
@@ -162,12 +161,12 @@ These were expensive to arrive at. Do not quietly reverse them.
    `archived/Content-Security-Policy.bcheck` decides everything by substring
    containment and carries a comment recording a false positive it had already
    had to patch out. See that entry in the reference section.
-5. **Only an effective header earns a suppression.** An `X-Frame-Options`
+1. **Only an effective header earns a suppression.** An `X-Frame-Options`
    browsers ignore protects nothing, and neither does `frame-ancestors *`.
-6. **What a non-enforcing header permits decides nothing.** Report-only content
+1. **What a non-enforcing header permits decides nothing.** Report-only content
    is never analyzed; Feature-Policy's content is ignored once Permissions-Policy
    is present; `coep-missing` is excused unless COOP asks for isolation.
-7. **Code naming.** `<prefix>-deprecated` means "present, legacy, no defect",
+1. **Code naming.** `<prefix>-deprecated` means "present, legacy, no defect",
    and there is no longer an exception: `xfo-deprecated` was renamed
    `xfo-allow-from` once the schema made codes an external contract, because it
    is rated `error` and a `-deprecated` suffix understated a value no browser
@@ -200,8 +199,20 @@ mutation-verified.
   Separately, every finding the corpus can produce is rendered, because a
   template naming `{sources}` beside data carrying `directives` is invisible
   until someone asks for the sentence.
+- Every combinable CSP code can name the directive its claim is about, via
+  `_claim_directives()` — from the finding's own `data`, or from
+  `CSP_CODE_DIRECTIVE` where it carries none. A claim the combiner cannot
+  locate cannot be intersected. The bijection caught `csp-plain-scheme` the
+  first time it ran: it names its directives under `schemes`, as
+  `{directive, scheme}` pairs, so `CSP_CLAIM_PAIRS` declares that spelling
+  rather than the resolver sniffing the data's shape.
 - Output order is deterministic: the tables are tuples, not sets. A set literal
-  here reorders output per process.
+  here reorders output per process. Sets are fine *inside* a function —
+  `_references()` and `taxonomy()` both build one and return `sorted()`, and
+  the CSP combiner tests membership in one it never iterates. The way to check
+  a writer for this is cross-process: the same document rendered under two
+  `PYTHONHASHSEED` values must give identical bytes. Verified for the `json`
+  writer on 2026-09-08 — five seeds, one md5.
 
 ## The header mapping (easy to get wrong)
 
@@ -213,12 +224,12 @@ to special-case it.
 Build it with `parse_headers(pairs)` or `parse_raw_headers(raw)` — never with a
 dict comprehension. Verified stdlib behaviour:
 
-| access | value |
-|---|---|
-| `getheaders()` | both pairs, duplicates intact |
-| `Message["name"]` | the **first** |
-| `{k: v for k, v in pairs}` | the **last** |
-| `CaseInsensitiveDict[name]` | **comma-joined** |
+| access                      | value                         |
+| --------------------------- | ----------------------------- |
+| `getheaders()`              | both pairs, duplicates intact |
+| `Message["name"]`           | the **first**                 |
+| `{k: v for k, v in pairs}`  | the **last**                  |
+| `CaseInsensitiveDict[name]` | **comma-joined**              |
 
 The fourth row is `requests`' own `.headers` (urllib3's `HTTPHeaderDict`
 underneath), and it does not merely lose a duplicate the way the first three
@@ -229,10 +240,17 @@ pieces for **two** cookies, because the date's internal comma looks exactly
 like a second join point. `adaptors.from_requests()` exists to route around
 this by reading `.raw.headers` instead, never to parse through it.
 
-Repeated headers are not a corner case. **Repeated CSP is enforced
-conjunctively**: a coverage gap fires only if *no* policy closes it, a weakness
-only if *every* policy permits it, and a syntax defect if *any* policy has it —
-that split is `CSP_SYNTAX_CODES`. Getting this wrong inverts the verdict.
+Repeated headers are not a corner case. **Several CSPs are enforced
+conjunctively**, and "several" includes a single header line: the value is a
+`serialized-policy-list`, so `split_policies()` runs before anything parses a
+policy. A coverage gap fires only if *no* policy closes it, a weakness only if
+*no* policy blocks it, and a syntax defect if *any* policy has it — that split
+is `CSP_SYNTAX_CODES`. Getting this wrong inverts the verdict.
+
+**"No policy blocks it" is not "every policy reports it"**, and the difference
+is the whole of the combiner: a policy silent about a directive permits it. The
+two CSP entries under **Deliberately decided** carry the reasoning and the
+measurements.
 
 `REPEATABLE_HEADERS` (CSP, CSP-Report-Only, Set-Cookie) may legally repeat;
 anything else repeated raises `duplicate-headers`. `_sole_value()` returns `None`
@@ -421,13 +439,11 @@ hst explain csp-unsafe-inline         # what a code means
 ```
 
 Two console scripts, `hst` and `http-security-test`, both at
-`http_security_test.cli:main`. **Standard library only** — `pip install
-http-security-test` gives a working tool with no dependencies, and there is
+`http_security_test.cli:main`. **Standard library only** — `pip install http-security-test` gives a working tool with no dependencies, and there is
 deliberately no `[cli]` extra, because an extra that installs nothing
 misrepresents the package.
 
-**Verb-first, and the bare form is deliberately a usage error.** `hst
-example.com` exits 2 with `did you mean: hst scan example.com`. A flat,
+**Verb-first, and the bare form is deliberately a usage error.** `hst example.com` exits 2 with `did you mean: hst scan example.com`. A flat,
 curl-shaped CLI was considered and rejected: every file-input format on the
 roadmap has a flag set disjoint from `scan`'s — no `-k`, no `-H`, but filters a
 single fetch has no use for — and retrofitting verbs onto a flat tool breaks
@@ -501,8 +517,7 @@ are answered, and answered **without touching the library**:
   was already rejected and is independently wrong here, since one target can
   yield several results and the same URL can be scanned twice in one run.
 
-Deliberately absent: **the command line**, because it carries `-H
-'Authorization: …'` and proxy credentials, and redacting means guessing at
+Deliberately absent: **the command line**, because it carries `-H 'Authorization: …'` and proxy credentials, and redacting means guessing at
 secrets. The precise provenance record already exists — `--raw` gives the actual
 request head, with its credential warning attached. One documented footgun beats
 two, one of them fuzzy.
@@ -555,7 +570,6 @@ prefix with a valid extension writes a file of that literal name, which is
 principle 4 applied to argv: refusing a legitimate input is worse than accepting
 an odd one, and the odd one is loud anyway.
 
-
 ## Working practices that paid off
 
 - **Verify, don't assert.** Several confident claims this project ran on turned
@@ -567,11 +581,13 @@ an odd one, and the odd one is loud anyway.
   recalling a figure. One rationale here was already wrong on exactly this
   point and stood for weeks because nothing on disk could contradict it; now
   something can.
+
 - **Mutation-test new guards.** Break the code, confirm the test fails, restore.
   A test that passes both ways is worse than none. This has paid for itself
   twice; most recently a guard returning `None` instead of `""` survived every
   mutation because the only caller tested truthiness, which is dead code
   pretending to be a decision.
+
 - **The wording is pinned too.** `tests/rendered_messages.txt` holds every
   distinct sentence the package can produce, and a companion test asserts it
   covers every rated code so it cannot pass vacuously. `catalog.py` is prose
@@ -581,14 +597,17 @@ an odd one, and the odd one is loud anyway.
   ```sh
   UPDATE_MESSAGE_SNAPSHOT=1 python -m pytest tests/ -k snapshot
   ```
+
 - **Refactors get behavioural equivalence checks.** `git show HEAD:<file>` into
   `/tmp`, run a corpus through old and new, diff the `(header, code)` sets. Both
   module splits were verified this way at 335 and 168 cases, zero mismatches.
+
 - **Scripted edits fail silently, twice bitten.** `str.replace` with an
   indentation-prefixed pattern also matches deeper indentation (a 4-space tuple
   entry matched a 12-space constructor argument and corrupted a `Finding`). And an
   anchor edited earlier in the session no-ops without complaint. Assert the anchor
   exists and is unique before replacing.
+
 - **A section number copied out of browser source needs re-checking.** The URL
   in Chromium's `net/cookies/cookie_constants.h:391` cites
   `draft-ietf-httpbis-rfc6265bis-13`; the current revision is -22, and the
@@ -597,6 +616,7 @@ an odd one, and the odd one is loud anyway.
   to the draft text (or `w3c/webref`'s extract of it) for the number itself.
   This generalises past cookies: any living-standard citation in an engine
   checkout is as old as the line it sits on.
+
 - **`urllib.parse` is core; `urllib.request` is not.** `exchange.py` imports
   `urllib.parse` for `scheme()` and `host()` — string parsing, no socket — and
   that belongs in `core` same as any other stdlib import; `urllib.request` is
@@ -611,6 +631,7 @@ broken by an agent that had read the section and filed it under taste.
 
 - **Never destroy uncommitted work; never write to git.** The human owns the git
   workflow entirely. Two families of command, and the second is the trap:
+
   - **Writing git state:** `add`, `commit`, `stash`, `push`, `merge`, `rebase`,
     `tag`, `branch`, `worktree add`. An agent ran `git stash` once and flattened
     the human's staged changes.
@@ -651,17 +672,92 @@ broken by an agent that had read the section and filed it under taste.
   `.claude/settings.json` blocks the discarding commands outright, because a
   rule that lives only in prose is read by exactly the agents that were going
   to follow it anyway.
+
 - **Never maintain `/home/crapula/ref`.** The human has their own tooling for
   that whole tree — no syncing, fetching, updating, pruning or cleanup, and no
   state-changing git command in any checkout under it. Read it; that is all. The
   reference section repeats this where the sync sources are recorded.
+
 - **They run `ruff format`.** Keep `ruff check` clean; do not reformat.
+
 - **Ask, with options and a recommendation,** on policy and design calls
   (severity, schema, scope). They engage closely and will push back with evidence
   when a premise is wrong — that has repeatedly been the right call.
 
 ## Deliberately decided (do not re-litigate without new information)
 
+- **A CSP header value is a policy *list*, and folding is legal.** Fixed
+  2026-09-08; `hst` used to read one header line as one policy and was the only
+  implementation of four that did. CSP3 defines the value as
+  `serialized-policy-list` (`1#serialized-policy`), and RFC 9110 §5.3 makes
+  folding a list-valued field into one comma-separated line explicitly
+  semantics-preserving. All three engines split before parsing, on the live
+  response path, each with a comment saying why: Chromium
+  `ParseContentSecurityPolicies()` walking `SplitAndTrim(value, ",")`
+  (reached from `PopulateParsedHeaders`, `parsed_headers.cc:50`) on top of
+  `HttpResponseHeaders::AddHeader` already splitting coalescing headers;
+  Firefox `CSP_AppendCSPFromHeader()` (`nsCSPUtils.cpp:585`, from
+  `Document::InitCSP`); WebKit `didReceiveHeader()`
+  (`ContentSecurityPolicy.cpp:250`). Chromium's own unit test
+  `SubsumesBasedOnCSPSourcesOnly` puts `"script-src http://*.one.com, script-src https://two.com"` in a single `Content-Security-Policy` header,
+  runs `AddContentSecurityPolicyFromHeaders` into a `std::vector`, and asserts
+  subsumption against the result — decisive, because a repeated directive
+  *within* one policy is ignored after the first, so the case means nothing
+  unless the comma made two policies.
+  `split_policies()` is the split, exported beside `parse_csp()` so an embedder
+  cannot repeat the bug, and `parse_csp()` takes ONE policy. Four details:
+  - **Empty elements are dropped** — RFC 9110 §5.6.1.2 makes ignoring them a
+    recipient MUST, and an empty policy constrains nothing anyway.
+  - **A header naming no policy at all** (`CSP:`, `CSP: ,`) is analysed as one
+    empty policy. Zero policies would report nothing, and `csp-missing` cannot
+    cover for it because the header IS present — a real site sends this, and it
+    was a regression caught only by the corpus diff, not by any unit test.
+  - **A comma inside a `report-uri` splits the policy, and the resulting
+    `csp-unknown-directive` is CORRECT.** It looks like a false positive and is
+    not: all three engines split on every comma at this layer, so the URL
+    really does break the policy in a browser. RFC 9110 §5.6.1 predicts it —
+    a field carrying a URI-reference "ought to be defined with delimiters
+    around that element", and CSP's grammar has none.
+  - **`Set-Cookie` cannot be folded and must never be**, which is the same
+    question answered the other way: RFC 9110 §5.3 names it the exception
+    ("Since it cannot be combined into a single field value"), Chromium lists
+    it in `IsNonCoalescingHeader()`, and `path-value` admits a comma
+    (RFC 6265 §4.1.1), so rewriting dates would not make folding safe either.
+    Prevalence: 65 domains of 43 476 sending CSP in OWASP's corpus (0.15 %),
+    including Pinterest across ~15 ccTLDs and `forms.gle`, which earned an
+    `error`-rated `csp-invalid-keyword` on a correct policy before the fix.
+- **Several policies combine by *claim*, never by code, and silence permits.**
+  Rewritten 2026-09-10. The unit is `(code, directive)`: two policies
+  permissive about different directives agree about nothing, and intersecting
+  on the code alone reported "a wildcard is effective" for `script-src *`
+  beside `img-src *` when the sibling pinned both to `'self'`. And **a policy
+  that does not constrain a directive permits it** — the older rule read
+  absence-of-finding as "this policy blocks it", so a policy silent about
+  script suppressed every script weakness beside it. `_sources()` returning
+  `None` is exactly the silence test.
+  - **There is no table of per-directive default values, and asking for one is
+    the wrong question.** CSP has no such thing: the only fallback is
+    `default-src` for fetch directives (`CSP_FALLBACKS`, applied by
+    `_sources()`), and an absent directive with no fallback restricts nothing.
+    What the combiner needed was the third state, not a value.
+  - **The coverage codes needed no special case and did not get one.** For
+    `csp-no-frame-ancestors`, "does not constrain frame-ancestors" *is*
+    "reports the gap", so the one rule collapses to "every policy reports it",
+    which is what a gap always meant. Syntax defects stay any-policy.
+  - **The old rule failed worst where it was most likely to fire**: suppression
+    needed *every* policy to report, so the less a policy said the more it
+    silenced. A bare `upgrade-insecure-requests` second header — constraining
+    nothing, usually added by a CDN — hid every script and style weakness in
+    the real policy beside it. Of the 267 multi-policy domains whose findings
+    changed, **229 (86 %) carry a policy with no fetch directive at all** and 72
+    carry exactly that one header. Treat "all sources must agree" as a smell:
+    it privileges the source that knows nothing.
+    Multi-policy responses are 754 of 43 476 CSP-sending domains (1.73 %) — 691
+    by repeated header lines and 65 by folding, two doing both — so the
+    conjunctive rules are not a corner case. Single-policy responses take the
+    `len(policies) == 1` short-circuit and were provably untouched: zero
+    comma-free values changed across all 27 222 distinct CSP values in the
+    corpus.
 - **The whole reporting family is rated `note`**, `ip-endpoints-undefined`
   included, which was re-rated down from `warning` on 2026-08-17. A reporting
   failure costs the operator information and nothing else: no browser
@@ -680,8 +776,7 @@ broken by an agent that had read the section and filed it under taste.
   deliverability into the group lookup — was implemented first and produces the
   same defect up to four times with one fix between them.
 - **`Report-To` is deprecated but still honoured, and reading only
-  `Reporting-Endpoints` is a false positive.** BCD says `deprecated: true,
-  standard_track: false` (Chrome 70 / Firefox 149 / Safari never), and both
+  `Reporting-Endpoints` is a false positive.** BCD says `deprecated: true, standard_track: false` (Chrome 70 / Firefox 149 / Safari never), and both
   engines nonetheless parse it and act on it: Chromium wires it up at
   `net/reporting/reporting_service.cc:250`, Firefox at
   `dom/reporting/ReportingHeader.cpp:211`. A response defining its groups only
@@ -698,10 +793,8 @@ broken by an agent that had read the section and filed it under taste.
   on this response, and whether each URL is one reports can be delivered to are
   all answerable from the response alone, and all three are checked. Note the
   parse question is real rather than pedantic: structured field dictionary keys
-  are lower-case by grammar (RFC 9651 `key = ( lcalpha / "*" ) *( lcalpha /
-  DIGIT / "_" / "-" / "." / "*" )`), and **both engines drop the entire header**
-  when the dictionary will not parse — Firefox `SFV::ParseDict(...); if
-  (!dict.IsValid()) return 0;`, Chromium `ParseDictionary` returning `nullopt`
+  are lower-case by grammar (RFC 9651 `key = ( lcalpha / "*" ) *( lcalpha / DIGIT / "_" / "-" / "." / "*" )`), and **both engines drop the entire header**
+  when the dictionary will not parse — Firefox `SFV::ParseDict(...); if (!dict.IsValid()) return 0;`, Chromium `ParseDictionary` returning `nullopt`
   — so one capital letter costs every group the header meant to define.
 - **The engines disagree about loopback reporting endpoints, and the spec sides
   with Firefox.** Reporting API step 5.3 (`w3c/webref`
@@ -924,8 +1017,7 @@ broken by an agent that had read the section and filed it under taste.
   `pragma-deprecated` note would fire on OWASP's own recommended pairing of
   `Cache-Control: no-store, max-age=0` with `Pragma: no-cache`. What makes the
   narrow case judgeable at all is that intent is visible — a *missing*
-  `Cache-Control` says nothing about what the author wanted, a *present* `Pragma:
-  no-cache` says exactly what they wanted, and §5.4 says they did not get it:
+  `Cache-Control` says nothing about what the author wanted, a *present* `Pragma: no-cache` says exactly what they wanted, and §5.4 says they did not get it:
   "the meaning of `Pragma: no-cache` in responses was never specified".
   **Neither of these two can be sized from OWASP's corpus**, and the check is
   not worth repeating: it collects 17 header names and `set-cookie` and
@@ -1073,17 +1165,23 @@ rulings above.
 - `mainsite/01_headers.md` and `mainsite/03_best_practices.md` — the header
   list and the recommended values. `03_best_practices.md` is the **source of
   truth**; the two JSONs below are generated from its tables by CI.
+
 - `ci/headers_add.json` — 13 headers with OWASP's recommended values.
+
 - `ci/headers_remove.json` — **87 information-leakage header names** OWASP says
   to strip (`X-Powered-By`, `X-AspNet-Version`, the Envoy/Datadog/B3 tracing
   set, …). This is the closest thing on disk to prior art for the parked
   *inverted "interesting headers"* switch.
+
 - `mainsite/02_browser_support.md` — one caniuse URL per header. Note how many
   are `mdn-*` URLs; see the caniuse caveat below before trusting the checkout
   to answer them.
+
 - `mainsite/04_technical_resources.md` — the other tools in this space.
+
 - `mainsite/07_statistics.md` — the published prevalence charts, **PNG images
   only**, so useless to read programmatically. Use the database instead:
+
 - `subprojects/data/data.db` — **the real-world corpus, and the most valuable
   single file in `/home/crapula/ref`.** 79 MB of SQLite, fetched by hand from
   the project's GitHub Release assets (CI generates it, local generation does
@@ -1097,6 +1195,7 @@ rulings above.
   684 485 rows over **250 000 domains** — the Majestic top-1M prefix, with
   `input.csv` beside it as the domain list. Three things to know before
   quoting a number from it:
+
   - **Only the 17 headers OSHP tracks** appear (`cache-control`,
     `x-frame-options`, `x-content-type-options`, `referrer-policy`,
     `strict-transport-security`, `content-security-policy`, the three
@@ -1120,9 +1219,11 @@ rulings above.
   contradicts 13.9 % of live deployments, while a 1-year threshold would
   contradict 26.4 % (and 1 105 send `max-age=0`). Prefer this over recalling a
   figure from Shodan or a blog.
+
 - `subprojects/validator/tests_suite.yml` — a Venom suite asserting OSHP
   conformance against a live site. Useful as an independent opinion to diff
   verdicts against.
+
 - The repo carries its own `CLAUDE.md`, including strict GenAI rules. Those
   govern *contributing there*, not reading it from here.
 
@@ -1221,6 +1322,13 @@ with the value*, and the second question is the one this package reasons about.
   `parsed_headers.cc` as the index of what the network service parses at all.
   Cookies are `net/cookies/cookie_util.cc` (the prefix rules) and
   `canonical_cookie.cc`; HSTS is `net/http/transport_security_state.cc`.
+  **`net/http/http_util.cc`'s `IsNonCoalescingHeader()` answers "may this
+  header be folded with commas" for any header, not just CSP** — nine names
+  (`date`, `expires`, `last-modified`, `location`, `retry-after`, `set-cookie`,
+  `www-authenticate`, `proxy-authenticate`, `strict-transport-security`), and
+  everything absent from it gets comma-split in `AddHeader()` before any
+  parser sees it. The HSTS entry carries its own reason: "STS specifies that
+  UAs must not process any STS headers after the first one."
   Feature flags gate a lot of this — `services/network/public/cpp/features.cc`
   says whether a parsed value is actually live, and
   `base::FEATURE_ENABLED_BY_DEFAULT` there is what turns "parsed" into
@@ -1265,7 +1373,12 @@ with the value*, and the second question is the one this package reasons about.
 `checks/security_checks.ts`, `checks/strictcsp_checks.ts` and
 `checks/parser_checks.ts` are the checks themselves;
 `allowlist_bypasses/{jsonp,angular,flash}.ts` is the curated data deliberately
-*not* embedded here.
+*not* embedded here. **Do not take its multi-policy model, because it has
+none:** `CspEvaluator` takes a single `Csp`, `CspParser` does
+`unparsedCsp.split(';')`, and the string `,` appears in no splitting call
+anywhere in the package — so it reads a folded policy list as one mangled
+policy, the bug fixed here on 2026-09-08. Read it for the checks, not for how
+policies combine.
 
 **`security/hstspreload`** — the source of the declared `[preload]` extra, so
 the behaviour of the only third-party dependency is readable. One public
@@ -1289,8 +1402,7 @@ sense `catalog.py` is:
 - `additional/security.txt` — the 62 names it treats as security-relevant at
   all: its answer to the scoping question the `Layout` section answers here.
 - `additional/fingerprint.txt` — **1 287 vendor/product banner headers**, each
-  annotated with what it identifies (`$WSEP (IBM WebSphere Application
-  Server)`, `Akamai-Cache-Status (Akamai Edge)`). Fifteen times the size of
+  annotated with what it identifies (`$WSEP (IBM WebSphere Application Server)`, `Akamai-Cache-Status (Akamai Edge)`). Fifteen times the size of
   OWASP's 87-name `headers_remove.json`, and the best prior art on disk for the
   parked *inverted "interesting headers"* switch.
 - `l10n/details.txt` (and its `_es` twin) — its prose catalogue, the analogue of
@@ -1379,8 +1491,7 @@ Surveyed 2026-08-21. Its value here is mostly evidentiary:
 
 - `archived/Content-Security-Policy.bcheck` is **principle 4's failure mode
   shipped by a major vendor and then archived by them**. Every decision is
-  substring containment against the whole header block — `" *" in
-  {to_lower(latest.response.headers)}`, `" 'unsafe-inline'"` flagged with no
+  substring containment against the whole header block — `" *" in {to_lower(latest.response.headers)}`, `" 'unsafe-inline'"` flagged with no
   nonce or `strict-dynamic` awareness — and `report-uri` and
   `block-all-mixed-content` are listed among its "insecure values". It even
   carries the epitaph: *"the deprecated `referrer` value was removed from
@@ -1524,8 +1635,7 @@ moment the question is per-directive or per-value.
   `SameSite` as a directive. Read it for the decomposition, and read
   `requiressecurity.py` as a **warning**: it lowercases the cookie name and
   then tests `startswith('__Secure')` / `startswith('__Host')`, so both prefix
-  branches are unreachable, and it falls back to guessing from `'session' in
-  name` / `'csrf' in name` — the guess the parked cache/cookie item refuses to
+  branches are unreachable, and it falls back to guessing from `'session' in name` / `'csrf' in name` — the guess the parked cache/cookie item refuses to
   make. Two failure modes to avoid in one 15-line file. Note *why* the first one
   is a bug, because this was recorded wrongly here once: lowercasing the name is
   not itself the error — browsers match these prefixes case-insensitively (see
@@ -1575,8 +1685,7 @@ moment the question is per-directive or per-value.
 - **`security/testssl.sh`** — `run_security_headers()` (~line 3580) is the
   baseline to beat, not a source of checks: it enumerates headers and rates
   *presence* only, and the comment near line 3641 says so outright ("I am not
-  testing for the correctness or anything stupid yet, e.g. `X-Frame-Options:
-  allowall`"). That sentence is this package's reason to exist.
+  testing for the correctness or anything stupid yet, e.g. `X-Frame-Options: allowall`"). That sentence is this package's reason to exist.
   `burp/Headers` and `burp/HeaderGuardian-Burpsuite-Pro-Extension` are the same
   baseline in miniature and in Python: hand-curated presence lists with an
   on/off flag per entry (`security_headers.txt` 10 entries, `cookie_flags.txt`
@@ -1790,7 +1899,7 @@ the long-form descriptions to land with the SARIF writer's `fullDescription`
 field removed the only thing a verbosity switch would have gated — do not
 reserve one now.
 
-**Tests:** 891 passing across 513 test functions, 122 of them CLI. `ruff check`
+**Tests:** 913 passing across 535 test functions, 122 of them CLI. `ruff check`
 clean. No test touches the network, with one deliberate exception: the redirect-
 limit test binds a loopback `http.server` on an ephemeral port, because urllib's
 own redirect bookkeeping cannot be tested any other way.

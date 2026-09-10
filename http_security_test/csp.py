@@ -50,8 +50,40 @@ FETCH_DIRECTIVES = frozenset(
 )
 
 
+def split_policies(value):
+    """The policies in one Content-Security-Policy header value.
+
+    CSP3 defines that value as a `serialized-policy-list` -- `1#serialized-policy`
+    -- so one header line may carry several policies separated by commas, and a
+    response sending two policies that way is indistinguishable from one sending
+    them in two header lines. The unit of analysis is therefore the policy and
+    never the line, which is what `parse_csp` must be handed.
+
+    Both engines split before parsing, and both say so. Chromium's
+    `ParseContentSecurityPolicies()` walks `SplitAndTrim(header_value, ",")`
+    (`services/network/public/cpp/content_security_policy/`
+    `content_security_policy.cc`), on top of `HttpResponseHeaders::AddHeader()`
+    already splitting coalescing headers; Firefox's `CSP_AppendCSPFromHeader()`
+    (`dom/security/nsCSPUtils.cpp`) tokenizes on ',' because "multiple headers
+    could be concatenated into one comma-separated list of policies".
+
+    Empty elements are dropped. RFC 9110 5.6.1.2 requires a recipient to "parse
+    and ignore a reasonable number of empty list elements", and a policy with no
+    directives constrains nothing in any case.
+
+    Deliberately NOT quote-aware, because neither engine is at this layer. A
+    comma inside a report-uri splits the policy in a real browser too, so
+    reading it as a separator agrees with them rather than approximating them.
+    """
+    return [policy for policy in (chunk.strip() for chunk in value.split(",")) if policy]
+
+
 def parse_csp(value):
     """Parse a CSP header into an ordered {directive: [source, ...]} mapping.
+
+    Takes ONE policy, not a header value: a value may carry several, and
+    `split_policies()` is what separates them. Passing a whole value here reads
+    the next policy's directive name as a source of the previous one.
 
     Directive names are lowercased. Source expressions keep their case, because
     host sources are case-sensitive in their path component. Repeated
@@ -466,21 +498,129 @@ CSP_SYNTAX_CODES = frozenset(
 )
 
 
+# Which directive a claim is about, for the combinable codes whose finding does
+# not name one in its `data`. NOT a table of default values: CSP has none, and
+# an absent directive with no default-src to fall back on restricts nothing at
+# all. This says which directive decides whether a policy speaks to the claim,
+# which is what `_sources()` is then asked about.
+CSP_CODE_DIRECTIVE = {
+    "csp-frame-ancestors-wildcard": "frame-ancestors",
+    "csp-no-base-uri": "base-uri",
+    # about script loading, which is what the message says: "sets neither
+    # default-src nor script-src". _sources() applies the fallback.
+    "csp-no-default-src": "script-src",
+    "csp-no-frame-ancestors": "frame-ancestors",
+    "csp-no-object-src": "object-src",
+    "csp-unsafe-eval": "script-src",
+}
+
+
+# The codes whose data pairs each offending value with the directive it sits
+# in, under a key of their own. `directives` is the common spelling and needs
+# no entry; csp-plain-scheme is the one code carrying {directive, scheme} pairs
+# instead, because its sentence names the scheme and the directive together.
+# Declared rather than sniffed out of the data's shape, for the same reason
+# CODE_HEADER is declared: a structural guess is a lookup that rots quietly.
+CSP_CLAIM_PAIRS = {"csp-plain-scheme": "schemes"}
+
+
+def _claim_directives(finding):
+    """The directives one finding claims something about.
+
+    KeyError for a combinable code that names no directive, deliberately and
+    for the same reason `describe()` raises on a missing template: a claim the
+    combiner cannot locate is a bug in the tables, not a finding to guess at.
+    """
+    data = finding.data or {}
+    named = data.get("directives")
+    if named:
+        return list(named)
+    key = CSP_CLAIM_PAIRS.get(finding.code)
+    if key:
+        return [entry["directive"] for entry in data[key]]
+    return [CSP_CODE_DIRECTIVE[finding.code]]
+
+
+def _with_directives(finding, directives):
+    """The finding, restricted to the directives whose claims survived.
+
+    A finding that never named directives is returned untouched -- adding the
+    key would put a field in the schema that the code's message never had.
+    """
+    data = dict(finding.data or {})
+    if data.get("directives"):
+        data["directives"] = directives
+    elif finding.code in CSP_CLAIM_PAIRS:
+        key = CSP_CLAIM_PAIRS[finding.code]
+        data[key] = [entry for entry in data[key] if entry["directive"] in directives]
+    else:
+        return finding
+    return finding._replace(data=data)
+
+
 def _analyze_csp_all(policies):
     """Findings for every Content-Security-Policy the response carries.
 
     One policy is the ordinary case and answers for itself. Several are enforced
-    together, so reporting each in isolation would call a directive missing that
-    a sibling policy sets -- which is worse than saying nothing.
+    together -- a resource must satisfy all of them -- so the question is never
+    what a policy says but what survives the intersection.
+
+    **The unit is the claim, `(code, directive)`, not the code.** Two policies
+    permissive about different directives agree about nothing, and intersecting
+    on the code alone reports the one they share: `script-src *` beside
+    `img-src *` becomes "a wildcard is effective" when the sibling policy pins
+    both to 'self' and none is.
+
+    **A policy that does not constrain a directive permits it.** That is the
+    third state, and the one the older rule collapsed: absence of a finding
+    meant "this policy blocks it", when a policy silent about script blocks
+    nothing and a browser runs the inline script anyway. `_sources()` returning
+    None is exactly that test.
+
+    The coverage codes need no special case under this rule and did not get
+    one. For `csp-no-frame-ancestors`, "does not constrain frame-ancestors" IS
+    "reports the gap", so the rule collapses to "every policy reports it" --
+    which is what a gap has always meant. Syntax defects stay any-policy: the
+    text of one policy is broken however its siblings read.
     """
     if len(policies) == 1:
         return _analyze_csp(policies[0])
-    per_policy = [{f.code: f for f in _analyze_csp(policy)} for policy in policies]
-    findings = []
-    for codes in per_policy:
-        for code, finding in codes.items():
-            if any(finding.code == seen.code for seen in findings):
+
+    parsed = [parse_csp(policy) for policy in policies]
+    per_policy = [_analyze_csp(policy) for policy in policies]
+    claimed = [
+        {
+            (finding.code, directive)
+            for finding in findings
+            if finding.code not in CSP_SYNTAX_CODES
+            for directive in _claim_directives(finding)
+        }
+        for findings in per_policy
+    ]
+
+    def survives(code, directive):
+        return all(
+            (code, directive) in claims or _sources(directives, directive) is None
+            for claims, directives in zip(claimed, parsed)
+        )
+
+    order, template, surviving = [], {}, {}
+    for findings in per_policy:
+        for finding in findings:
+            if finding.code not in template:
+                template[finding.code] = finding
+                order.append(finding.code)
+            if finding.code in CSP_SYNTAX_CODES:
                 continue
-            if code in CSP_SYNTAX_CODES or all(code in other for other in per_policy):
-                findings.append(finding)
+            kept = surviving.setdefault(finding.code, [])
+            for directive in _claim_directives(finding):
+                if directive not in kept and survives(finding.code, directive):
+                    kept.append(directive)
+
+    findings = []
+    for code in order:
+        if code in CSP_SYNTAX_CODES:
+            findings.append(template[code])
+        elif surviving[code]:
+            findings.append(_with_directives(template[code], surviving[code]))
     return findings

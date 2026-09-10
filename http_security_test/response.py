@@ -29,7 +29,7 @@ import json
 import re
 
 from . import cookies
-from .csp import _analyze_csp, _analyze_csp_all, parse_csp
+from .csp import _analyze_csp, _analyze_csp_all, parse_csp, split_policies
 from .exchange import host as _host
 from .exchange import scheme as _scheme
 from .findings import Finding, identity
@@ -656,6 +656,17 @@ def _report_missing(present, secure=True, status=None):
     return findings
 
 
+def _csp_policies(present):
+    """Every enforced policy the response carries, in order.
+
+    The unit is the policy and not the header line: one line may carry a
+    comma-separated list of them -- see `csp.split_policies()` -- so a reader
+    that iterates values is reading a policy and a half whenever a server sends
+    the list form. Every raw-value reader goes through here for that reason.
+    """
+    return [policy for value in _lookup_all(present, "Content-Security-Policy") for policy in split_policies(value)]
+
+
 def _restricts_framing(present):
     """Whether the CSP's frame-ancestors directive actually constrains framing.
 
@@ -663,8 +674,8 @@ def _restricts_framing(present):
     reported for lacking, so it does not count as covering anything.
     """
     # Every policy is enforced, so framing is restricted if any of them says so.
-    for value in _lookup_all(present, "Content-Security-Policy"):
-        sources = parse_csp(value).get("frame-ancestors")
+    for policy in _csp_policies(present):
+        sources = parse_csp(policy).get("frame-ancestors")
         if bool(sources) and "*" not in sources:
             return True
     return False
@@ -1050,8 +1061,8 @@ def _csp_report_to_groups(present):
     weakness, which has to be in all of them to survive the intersection.
     """
     groups = []
-    for value in _lookup_all(present, "Content-Security-Policy"):
-        groups.extend(parse_csp(value).get("report-to", []))
+    for policy in _csp_policies(present):
+        groups.extend(parse_csp(policy).get("report-to", []))
     return groups
 
 
@@ -1170,7 +1181,13 @@ def analyze(exchange):
     findings = _report_missing(present, secure, exchange.response.status)
     for name, values in present.items():
         if name == "content-security-policy":
-            findings.extend(_analyze_csp_all(values))
+            # A header naming no policy at all -- `CSP:` or `CSP: ,` -- still
+            # protects nothing, and "protects nothing" is exactly what the
+            # coverage codes report. Analysing zero policies would report
+            # nothing whatsoever, and `csp-missing` cannot cover for that
+            # because the header IS present: the response would carry a
+            # useless CSP and earn no finding of any kind.
+            findings.extend(_analyze_csp_all(_csp_policies(present) or [""]))
             continue
         for value in values:
             findings.extend(_analyze_header(name, value))
