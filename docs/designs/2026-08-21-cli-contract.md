@@ -436,9 +436,9 @@ Format names are a closed set. Given one `-o` argument:
 
 1. If it contains a colon **and the text before the first colon is a known
    format name**, that is the format and the remainder is the path.
-1. Otherwise the whole argument is a path, and the format comes from its
+2. Otherwise the whole argument is a path, and the format comes from its
    lowercased extension.
-1. If neither resolves, usage error naming both fixes.
+3. If neither resolves, usage error naming both fixes.
 
 `-o C:\out.json` is therefore safe: `C` is not a format name, so rule 1 does not
 fire and rule 2 reads `.json`.

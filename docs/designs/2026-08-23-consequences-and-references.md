@@ -571,16 +571,16 @@ consequences: xss -- Cross-site scripting (CWE-79, CAPEC-63)
 
 1. `CODE_HEADER` + its tests. Self-contained, closes a parked item, no schema
    change. Ships alone if the rest slips.
-1. `references.py` + helpers + shape tests.
-1. `Consequence` namedtuple, `CONSEQUENCES` in `catalog.py`, empty
+2. `references.py` + helpers + shape tests.
+3. `Consequence` namedtuple, `CONSEQUENCES` in `catalog.py`, empty
    `CODE_CONSEQUENCES` in `findings.py`, bijection tests failing.
-1. Map all 102 codes; tests go green.
-1. `CODE_TAXONOMY` overlay, seeded with the verified entries above and whatever
+4. Map all 102 codes; tests go green.
+5. `CODE_TAXONOMY` overlay, seeded with the verified entries above and whatever
    a pass over CAPEC per header family turns up.
-1. `reporting.py`: `consequences` per finding, the `references` block.
-1. `cli/text.py` rendering; regenerate the terminal snapshot.
-1. `cli/commands.py`: `explain`.
-1. `__init__.py` exports; CLAUDE.md.
+6. `reporting.py`: `consequences` per finding, the `references` block.
+7. `cli/text.py` rendering; regenerate the terminal snapshot.
+8. `cli/commands.py`: `explain`.
+9. `__init__.py` exports; CLAUDE.md.
 
 ## 9. For CLAUDE.md when this lands
 

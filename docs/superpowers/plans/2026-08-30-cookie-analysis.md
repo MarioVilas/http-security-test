@@ -1522,10 +1522,10 @@ must act on them. Do both now:
    `test_every_level_a_finding_carries_is_a_real_severity` with
    `@pytest.mark.skip(reason="COOKIE_CASES lands in Task 5")`. `COOKIE_CASES`
    now exists — delete the decorator and confirm the test passes.
-1. **Remove the `# noqa: F401` on `Finding` in `cookies.py`**, if Task 2 added
+2. **Remove the `# noqa: F401` on `Finding` in `cookies.py`**, if Task 2 added
    one. `Finding` is used from this task onward, so the suppression is now
    stale and `ruff` should be the thing that notices if that ever changes.
-1. **Remove the `# noqa: F821` on the `COOKIE_CASES` reference** in
+3. **Remove the `# noqa: F821` on the `COOKIE_CASES` reference** in
    `tests/test_headers.py` (Task 1 added it, because `ruff` flags an undefined
    name statically whether or not the test is skipped). Once `COOKIE_CASES`
    exists the suppression is stale, and leaving it would hide a genuine
@@ -2253,18 +2253,18 @@ message naming it, matching whatever the existing reserved-flag tests assert.
 Seven edits, each a fact that is now wrong:
 
 1. **Layout** — add `cookies.py   Set-Cookie: the parser, the name tables, the analysis` to the module list, and add it to the `core` line of the layering block.
-1. **Two stale code counts, not one.** The `Status` section AND
+2. **Two stale code counts, not one.** The `Status` section AND
    `CLAUDE.md:~1364` in the humble reference entry, which reads "This package
    has 102 codes over far fewer headers, so that file is a ready-made gap
    list." Update both. In `Status`: analyser code count `102` → `118`; the severity census `(39 error / 26 warning / 37 note)` → `(48 error / 26 warning / 44 note)`; consequence slugs `Eight` → `Ten`; `references.py` resolves `40 headers` → `41 headers`; core modules `12` → `13`; test count from the final `pytest` run.
-1. **The output schema** — `inventory` gains `"cookies": []`; note it is the sixth key and the only list of parsed objects.
-1. **Two stale "sixth key" claims, now self-contradictory** (raised as a Minor by the Task 4 review). `Content-Type` is discussed as a candidate *sixth* inventory key in two places, and `cookies` has now taken that ordinal:
+3. **The output schema** — `inventory` gains `"cookies": []`; note it is the sixth key and the only list of parsed objects.
+4. **Two stale "sixth key" claims, now self-contradictory** (raised as a Minor by the Task 4 review). `Content-Type` is discussed as a candidate *sixth* inventory key in two places, and `cookies` has now taken that ordinal:
    - `CLAUDE.md` line ~316: "A sixth inventory key for it was designed on 2026-08-24 and deferred".
    - `http_security_test/response.py` line ~1220, the same claim inside `inventory()`'s docstring — two paragraphs below the new cookies paragraph that calls cookies the sixth.
      Reword both to "a further inventory key" or "a seventh inventory key", whichever reads better in place. **Do not delete the Content-Type reasoning** — it is a recorded decision with a stated trigger (`Vary` as the next candidate), and only its ordinal is wrong.
-1. **Parked, with intent to do** — delete the whole `**`Set-Cookie` analysis**` item; it is done. Leave the two cache items, and update the cache/cookie item's opening: its stated blocker ("land it with the cookie parser") is now satisfied, so restate the remaining blocker as the `caching`-table contract.
-1. **Design principles** — principle 1 needs a sentence: a rating is a code's *default* and a finding may carry its own, which is SARIF's `result.level`.
-1. **Invariants the test suite pins** — the `identity()` bullet says "two cookies each missing `Secure` will be two more" in the future tense. It is now exercised; change the tense and name the test.
+5. **Parked, with intent to do** — delete the whole `**`Set-Cookie` analysis**` item; it is done. Leave the two cache items, and update the cache/cookie item's opening: its stated blocker ("land it with the cookie parser") is now satisfied, so restate the remaining blocker as the `caching`-table contract.
+6. **Design principles** — principle 1 needs a sentence: a rating is a code's *default* and a finding may carry its own, which is SARIF's `result.level`.
+7. **Invariants the test suite pins** — the `identity()` bullet says "two cookies each missing `Secure` will be two more" in the future tense. It is now exercised; change the tense and name the test.
 
 - [ ] **Step 7b: Fix the stacked-`which` prose (Task 7 review, Minor)**
 

@@ -710,7 +710,7 @@ Expected: FAIL — `ImportError: cannot import name 'analyze'` (the current `ana
 In `http_security_test/response.py`:
 
 1. Rename `def analyze(name, value)` to `def _analyze_header(name, value)` and update its call site inside the old `analyze_all` body.
-1. Replace `def analyze_all(present, secure=True, host=None)` with:
+2. Replace `def analyze_all(present, secure=True, host=None)` with:
 
 ```python
 def analyze(exchange):
@@ -739,7 +739,7 @@ from .message import mapping as _mapping
 
 3. Change `def inventory(present)` to `def inventory(exchange)` and make its first line `present = _normalize(_mapping(exchange.response.headers))`.
 
-1. In `http_security_test/__init__.py`, replace `analyze, analyze_all, inventory` in the `.response` import and in `__all__` with `analyze, inventory`.
+4. In `http_security_test/__init__.py`, replace `analyze, analyze_all, inventory` in the `.response` import and in `__all__` with `analyze, inventory`.
 
 - [ ] **Step 4: Migrate the existing call sites**
 
@@ -1503,12 +1503,12 @@ Expected: all passed
 Edit these sections, and no others:
 
 1. **Layout** — add `exchange.py` and `adaptors.py`; change `cli/exchange.py` to `cli/outcome.py` with its new one-line description.
-1. **Dependencies run one way** — replace the block with the four-layer direction rule and note that the test now enforces direction rather than a single name.
-1. **The header mapping (easy to get wrong)** — add the fourth row to the access table: `CaseInsensitiveDict[name]` → **comma-joined**, with the `Expires`-date example showing 3 pieces for 2 cookies.
-1. **The output schema** — add `fidelity` beside `raw` and the three-value vocabulary.
-1. **Parked, with intent to do** — strike `--all-hops`'s blocker (the status line is now read), and add the three newly-unblocked finding families: protocol hygiene, verb/preflight, TRACE/XST.
-1. **Working practices** — one sentence that `urllib.parse` is permitted in the analyser and `urllib.request` is not, since a reader will otherwise see `import urllib.parse` in `exchange.py` and call it a breach.
-1. **Status** — update the test count and note the new modules.
+2. **Dependencies run one way** — replace the block with the four-layer direction rule and note that the test now enforces direction rather than a single name.
+3. **The header mapping (easy to get wrong)** — add the fourth row to the access table: `CaseInsensitiveDict[name]` → **comma-joined**, with the `Expires`-date example showing 3 pieces for 2 cookies.
+4. **The output schema** — add `fidelity` beside `raw` and the three-value vocabulary.
+5. **Parked, with intent to do** — strike `--all-hops`'s blocker (the status line is now read), and add the three newly-unblocked finding families: protocol hygiene, verb/preflight, TRACE/XST.
+6. **Working practices** — one sentence that `urllib.parse` is permitted in the analyser and `urllib.request` is not, since a reader will otherwise see `import urllib.parse` in `exchange.py` and call it a breach.
+7. **Status** — update the test count and note the new modules.
 
 Do **not** rewrite the design principles; none of them changed.
 

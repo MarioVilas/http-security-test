@@ -105,13 +105,13 @@ Read from `w3c/webref` `ed/algorithms/rfc6265bis.json`, algorithms [5] and
 
 1. Split the set-cookie-string at the first `;`. Everything before is the
    name-value-pair, everything after is unparsed-attributes.
-1. Split the name-value-pair at the **first** `=`. If there is no `=`, the
+2. Split the name-value-pair at the **first** `=`. If there is no `=`, the
    name is empty and the value is the whole string. (This is what makes
    `cookie-hidden-prefix` reachable.)
-1. Strip leading and trailing WSP from both.
-1. For each attribute: discard the `;`, take up to the next `;`, split at the
+3. Strip leading and trailing WSP from both.
+4. For each attribute: discard the `;`, take up to the next `;`, split at the
    first `=`, strip WSP, lowercase the attribute name.
-1. Unrecognised attribute names are kept, not dropped. The spec says a UA
+5. Unrecognised attribute names are kept, not dropped. The spec says a UA
    ignores them and both engines do; this package **reports** them, which is
    `cookie-unknown-attribute` below.
 

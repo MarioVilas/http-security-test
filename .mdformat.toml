@@ -1,0 +1,12 @@
+number = true
+
+# uncomment for Python 3.13+
+#exclude = [
+#
+#    # anything not ending in ".md"
+#    "**/?", "**/??", "**/???", "**/*[!.]??", "**/*[!m]?", "**/*[!d]",
+#
+#    # anything under a top-level directory other than "docs"
+#    "[!d]*/**", "d[!o]*/**", "do[!c]*/**", "doc[!s]*/**", "docs?*/**",
+#    "d/**", "do/**", "doc/**",
+#]

@@ -590,7 +590,7 @@ for reporting it anyway:
    outright, which fails closed, but it also means the CORS the operator
    configured is not happening at all." Reporting one and not the other is an
    accident of which shape happened to be implemented.
-1. It is a leading indicator of the real vulnerability. A developer who writes
+2. It is a leading indicator of the real vulnerability. A developer who writes
    `https://*.example.com`, finds CORS broken, and needs it working by Friday
    very often "fixes" it by reflecting the `Origin` header back — which is the
    origin-reflection defect the parked active check exists to catch. The

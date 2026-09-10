@@ -144,14 +144,14 @@ These were expensive to arrive at. Do not quietly reverse them.
    -- one defect can be worth more on one cookie than on another, and that is a
    rating rather than a different fact. `ESCALATABLE` names the codes that do
    this and `level_of()` resolves a finding's own level or its code's default.
-1. **Inventories are facts, findings are judgments.** Nothing is withheld from an
+2. **Inventories are facts, findings are judgments.** Nothing is withheld from an
    inventory because of what it contains. HSTS appears in a `missing` inventory on
    a plaintext target; the *finding* is what `secure=False` suppresses.
-1. **Severity rule.** `error` = the header does not deliver the protection its
+3. **Severity rule.** `error` = the header does not deliver the protection its
    presence implies (browsers ignore it, or it permits the very thing it exists to
    stop). `warning` = it protects, but a hardening directive is missing. `note` =
    a fact with no defect.
-1. **A false positive on a correct configuration is the worst outcome.** This
+4. **A false positive on a correct configuration is the worst outcome.** This
    project exists because the tool it forked called `default-src 'self'` unsafe by
    substring match. Two Criticals found in review were the same bug in new
    clothes (`require-corp; report-to="…"` read as invalid; the nonce +
@@ -161,12 +161,12 @@ These were expensive to arrive at. Do not quietly reverse them.
    `archived/Content-Security-Policy.bcheck` decides everything by substring
    containment and carries a comment recording a false positive it had already
    had to patch out. See that entry in the reference section.
-1. **Only an effective header earns a suppression.** An `X-Frame-Options`
+5. **Only an effective header earns a suppression.** An `X-Frame-Options`
    browsers ignore protects nothing, and neither does `frame-ancestors *`.
-1. **What a non-enforcing header permits decides nothing.** Report-only content
+6. **What a non-enforcing header permits decides nothing.** Report-only content
    is never analyzed; Feature-Policy's content is ignored once Permissions-Policy
    is present; `coep-missing` is excused unless COOP asks for isolation.
-1. **Code naming.** `<prefix>-deprecated` means "present, legacy, no defect",
+7. **Code naming.** `<prefix>-deprecated` means "present, legacy, no defect",
    and there is no longer an exception: `xfo-deprecated` was renamed
    `xfo-allow-from` once the schema made codes an external contract, because it
    is rated `error` and a `-deprecated` suffix understated a value no browser
