@@ -35,13 +35,14 @@
 - **Mutation-test every new guard.** Break it, confirm a test fails, restore from `$SCRATCH`. A test that passes both ways is worse than none.
 - Cookie names are **case-sensitive identifiers**; prefix and list *matching* is **case-insensitive**. Both, at once, everywhere.
 
----
+______________________________________________________________________
 
 ### Task 1: Per-finding severity
 
 `FINDING_SEVERITY` becomes a code's *default* rather than its only rating. Nothing cookie-specific; the rest of the plan depends on it.
 
 **Files:**
+
 - Modify: `http_security_test/findings.py` (the `Finding` namedtuple ~line 34; add `level_of` and `ESCALATABLE` near `severity` ~line 520)
 - Modify: `http_security_test/reporting.py:140`
 - Modify: `http_security_test/findings.py:531` (`order_findings`)
@@ -49,7 +50,9 @@
 - Test: `tests/test_headers.py`, `tests/test_reporting.py`
 
 **Interfaces:**
+
 - Consumes: nothing.
+
 - Produces: `Finding(header, code, data=None, level=None)`; `level_of(finding) -> str`; `ESCALATABLE: frozenset[str]`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -189,18 +192,21 @@ Expected: the mutation fails `test_a_finding_can_carry_its_own_level` and `test_
 
 Ready to commit: `findings.py`, `reporting.py`, `__init__.py`, `tests/test_headers.py`, `tests/test_reporting.py`. Suggested message: `feat: allow a finding to carry its own severity level`. **Do not run git** — tell the human it is ready.
 
----
+______________________________________________________________________
 
 ### Task 2: The `Set-Cookie` parser
 
 Parsing only. No findings, no tables, no analysis.
 
 **Files:**
+
 - Create: `http_security_test/cookies.py`
 - Test: `tests/test_cookies.py` (new)
 
 **Interfaces:**
+
 - Consumes: `Finding` from Task 1 (imported but not yet used); `message` for nothing yet.
+
 - Produces: `Cookie = namedtuple("Cookie", "name value attributes raw")`; `parse_set_cookie(value) -> Cookie`; `parse_cookies(present) -> tuple[Cookie, ...]`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -401,19 +407,23 @@ Expected: PASS. `cookies.py` imports only `collections` and `.findings`, both at
 
 Ready to commit: `http_security_test/cookies.py`, `tests/test_cookies.py`. Suggested message: `feat: parse Set-Cookie per rfc6265bis 5.2`.
 
----
+______________________________________________________________________
 
 ### Task 3: Name classification and the typo metric
 
 Pure functions and tables. Still no findings.
 
 **Files:**
+
 - Modify: `http_security_test/cookies.py`
 - Test: `tests/test_cookies.py`
 
 **Interfaces:**
+
 - Consumes: `Cookie` from Task 2.
+
 - Produces, all module-level in `cookies.py`:
+
   - Tables: `KNOWN_ATTRIBUTES`, `TYPO_SENSITIVE_ATTRIBUTES`, `COOKIE_PREFIXES`, `_PREFIX_SPELLING`, `PREFIX_REQUIREMENTS`, `SESSION_NAMES`, `SESSION_PATTERNS`, `INFRASTRUCTURE_NAMES`, `INFRASTRUCTURE_PATTERNS`, `CSRF_FRAGMENTS`.
   - Public: `strip_prefix(name) -> str`; `is_session_name(name) -> bool`; `is_infrastructure_name(name) -> bool`; `osa_distance(a, b) -> int`; `suspected_attribute(name, absent_from) -> str | None`.
   - Private: `_matches(name, names, patterns) -> bool`. Task 5 and Task 6 call the public four and `PREFIX_REQUIREMENTS`; nothing outside this module calls `_matches`.
@@ -797,6 +807,7 @@ cp http_security_test/cookies.py "$SCRATCH/"
 # j > 1 ...` block), making it plain Levenshtein.
 python -m pytest tests/test_cookies.py -q
 ```
+
 Expected: FAIL on the eight transposition cases. **If it passes, stop** — the metric is not pinned and a future refactor can silently break it. Restore with `cp "$SCRATCH/cookies.py" http_security_test/cookies.py`.
 
 Then mutate `SESSION_PATTERNS` to add `"*session*"` and confirm `test_non_session_names_do_not_match` fails on `_hjSessionUser_1234`, `taboola_session_id` and `ai_session`. Restore.
@@ -805,18 +816,21 @@ Then mutate `SESSION_PATTERNS` to add `"*session*"` and confirm `test_non_sessio
 
 Ready to commit: `http_security_test/cookies.py`, `tests/test_cookies.py`. Suggested message: `feat: cookie name classification and typo metric`.
 
----
+______________________________________________________________________
 
 ### Task 4: The `inventory.cookies` table
 
 **Files:**
+
 - Modify: `http_security_test/cookies.py`
 - Modify: `http_security_test/response.py` (`inventory()`, ~line 1195; its docstring says "Five tables")
 - Modify: `http_security_test/__init__.py`
 - Test: `tests/test_cookies.py`, `tests/test_headers.py`, `tests/test_reporting.py`
 
 **Interfaces:**
+
 - Consumes: `parse_cookies`, `is_infrastructure_name` from Tasks 2–3.
+
 - Produces: `cookie_as_dict(cookie) -> dict`; `inventory()` gains a `"cookies"` key holding `list[dict]`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -968,7 +982,7 @@ Run: `python -m pytest tests/ -q && ruff check`
 
 **One existing test WILL fail and must be updated:**
 `tests/test_headers.py::test_the_report_carries_every_inventory` (around line
-1163) asserts the inventory key set is *exactly* the five existing names. Add
+1163\) asserts the inventory key set is *exactly* the five existing names. Add
 `"cookies"` to that set. It is an exact-set assertion on purpose — a sixth key
 appearing unannounced is precisely what it exists to catch — so update it,
 never loosen it to a subset check.
@@ -982,6 +996,7 @@ key is absent is evidence the renderer is tolerant, which is wanted.
 - [ ] **Step 6: Verify a well-configured cookie is visible**
 
 Run:
+
 ```bash
 python -c "
 from http_security_test import Exchange, Request, Response, report
@@ -991,19 +1006,21 @@ ex = Exchange(Request.from_parts(url='https://example.com/'),
                   ('Set-Cookie', '__Host-sid=x; Path=/; Secure; HttpOnly; SameSite=Strict')]))
 print(json.dumps(report(ex)['response']['inventory']['cookies'], indent=2))"
 ```
+
 Expected: one row, every key present, `judged: true`. This is the case the table exists for — a correct cookie raises no finding, and without the inventory it would leave no trace in the report at all.
 
 - [ ] **Step 7: Checkpoint**
 
 Ready to commit: `cookies.py`, `response.py`, the two test files. Suggested message: `feat: inventory the cookies a response sets`.
 
----
+______________________________________________________________________
 
 ### Task 5: Tier 1 — the nine codes where a browser rejects or degrades the cookie
 
 All `error`, all fixed-rating, all firing on every cookie including infrastructure ones. Adds the two consequence slugs, because these codes reference them.
 
 **Files:**
+
 - Modify: `http_security_test/cookies.py`
 - Modify: `http_security_test/findings.py` (`FINDING_SEVERITY`, `CODE_HEADER`, `CODE_CONSEQUENCES`)
 - Modify: `http_security_test/catalog.py` (`MESSAGES`, `CONSEQUENCES`)
@@ -1012,7 +1029,9 @@ All `error`, all fixed-rating, all firing on every cookie including infrastructu
 - Test: `tests/test_cookies.py`, `tests/test_headers.py`
 
 **Interfaces:**
+
 - Consumes: everything from Tasks 2–4.
+
 - Produces: `analyze_cookies(present, trustworthy, host) -> list[Finding]`.
 
 - [ ] **Step 1: Add the two consequence slugs first**
@@ -1503,10 +1522,10 @@ must act on them. Do both now:
    `test_every_level_a_finding_carries_is_a_real_severity` with
    `@pytest.mark.skip(reason="COOKIE_CASES lands in Task 5")`. `COOKIE_CASES`
    now exists — delete the decorator and confirm the test passes.
-2. **Remove the `# noqa: F401` on `Finding` in `cookies.py`**, if Task 2 added
+1. **Remove the `# noqa: F401` on `Finding` in `cookies.py`**, if Task 2 added
    one. `Finding` is used from this task onward, so the suppression is now
    stale and `ruff` should be the thing that notices if that ever changes.
-3. **Remove the `# noqa: F821` on the `COOKIE_CASES` reference** in
+1. **Remove the `# noqa: F821` on the `COOKIE_CASES` reference** in
    `tests/test_headers.py` (Task 1 added it, because `ruff` flags an undefined
    name statically whether or not the test is skipped). Once `COOKIE_CASES`
    exists the suppression is stale, and leaving it would hide a genuine
@@ -1518,10 +1537,12 @@ Expected: PASS, and no `noqa` warnings.
 - [ ] **Step 8: Regenerate the message snapshot and read the diff**
 
 Run:
+
 ```bash
 UPDATE_MESSAGE_SNAPSHOT=1 python -m pytest tests/ -k snapshot
 git diff --stat tests/rendered_messages.txt
 ```
+
 Expected: nine added lines and no changes to existing ones. **Read every added sentence.** A template naming `{sources}` beside data carrying `directives` renders as a crash or as nonsense, and this snapshot is the only thing that shows it. `git diff` is read-only and permitted.
 
 - [ ] **Step 9: Run everything**
@@ -1545,18 +1566,21 @@ cp "$SCRATCH/cookies.py" http_security_test/cookies.py
 
 Ready to commit: `cookies.py`, `findings.py`, `catalog.py`, `references.py`, `response.py`, `tests/test_cookies.py`, `tests/test_headers.py`, `tests/rendered_messages.txt`. Suggested message: `feat: report cookies a browser rejects or degrades`.
 
----
+______________________________________________________________________
 
 ### Task 6: Tier 2 — six laddered hardening codes, and suppression
 
 **Files:**
+
 - Modify: `http_security_test/cookies.py`
 - Modify: `http_security_test/findings.py`
 - Modify: `http_security_test/catalog.py`
 - Test: `tests/test_cookies.py`, `tests/test_headers.py`
 
 **Interfaces:**
+
 - Consumes: Tasks 2–5.
+
 - Produces: `evidence_for(cookie, attribute) -> list[str]`; six new codes.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1878,10 +1902,10 @@ Census: `assert counts == {"error": 48, "warning": 26, "note": 43}`
 - [ ] **Step 6: Regenerate the snapshot and read the diff**
 
 Run:
+
 ```bash
 UPDATE_MESSAGE_SNAPSHOT=1 python -m pytest tests/ -k snapshot
 ```
-
 
 Expected: six added lines. Read them.
 
@@ -1908,17 +1932,20 @@ cp "$SCRATCH/cookies.py" http_security_test/cookies.py
 
 Ready to commit: `cookies.py`, `findings.py`, `catalog.py`, both test files, the snapshot. Suggested message: `feat: rate cookie hardening gaps by evidence`.
 
----
+______________________________________________________________________
 
 ### Task 7: `cookie-unknown-attribute`
 
 **Files:**
+
 - Modify: `http_security_test/cookies.py`
 - Modify: `http_security_test/findings.py`, `http_security_test/catalog.py`
 - Test: `tests/test_cookies.py`, `tests/test_headers.py`
 
 **Interfaces:**
+
 - Consumes: `KNOWN_ATTRIBUTES`, `suspected_attribute` from Task 3.
+
 - Produces: one code, fixed `note`, consequences `()`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -2052,6 +2079,7 @@ Census: `assert counts == {"error": 48, "warning": 26, "note": 44}`
 UPDATE_MESSAGE_SNAPSHOT=1 python -m pytest tests/ -k snapshot
 python -m pytest tests/ -q && ruff check
 ```
+
 Expected: one added line, rendering both with and without the suspected clause. If only one form appears, add a corpus case for the other.
 
 - [ ] **Step 7: Mutation-test the two guards**
@@ -2070,18 +2098,21 @@ cp "$SCRATCH/cookies.py" http_security_test/cookies.py
 
 Suggested message: `feat: report unrecognised and misspelled cookie attributes`.
 
----
+______________________________________________________________________
 
 ### Task 8: CLI rendering and documentation
 
 **Files:**
+
 - Modify: `http_security_test/cli/text.py` (`_inventory_lines`, ~line 106)
 - Modify: `http_security_test/cli/commands.py` (`do_explain`, ~line 47)
 - Modify: `CLAUDE.md`
 - Test: `tests/test_cli_text.py`, `tests/test_cli_explain.py`, `tests/cli_terminal_snapshot.txt`
 
 **Interfaces:**
+
 - Consumes: `inventory()["cookies"]`, `ESCALATABLE`.
+
 - Produces: nothing further.
 
 - [ ] **Step 1: Write the failing tests**
@@ -2186,9 +2217,11 @@ In `cli/commands.py`, add `ESCALATABLE` to the `from ..findings import` block (a
 - [ ] **Step 5: Regenerate the terminal snapshot and read the diff**
 
 Run:
+
 ```bash
 python -m pytest tests/test_cli_text.py -q
 ```
+
 If `tests/cli_terminal_snapshot.txt` is generated by an env var like the message snapshot, use the same mechanism — check with `grep -rn "cli_terminal_snapshot" tests/`. Read the diff; the column widths in `explain` changed, so alignment shifts are expected and anything else is not.
 
 - [ ] **Step 6: Reserve `--ignore-cookie`**
@@ -2220,18 +2253,18 @@ message naming it, matching whatever the existing reserved-flag tests assert.
 Seven edits, each a fact that is now wrong:
 
 1. **Layout** — add `cookies.py   Set-Cookie: the parser, the name tables, the analysis` to the module list, and add it to the `core` line of the layering block.
-2. **Two stale code counts, not one.** The `Status` section AND
+1. **Two stale code counts, not one.** The `Status` section AND
    `CLAUDE.md:~1364` in the humble reference entry, which reads "This package
    has 102 codes over far fewer headers, so that file is a ready-made gap
    list." Update both. In `Status`: analyser code count `102` → `118`; the severity census `(39 error / 26 warning / 37 note)` → `(48 error / 26 warning / 44 note)`; consequence slugs `Eight` → `Ten`; `references.py` resolves `40 headers` → `41 headers`; core modules `12` → `13`; test count from the final `pytest` run.
-3. **The output schema** — `inventory` gains `"cookies": []`; note it is the sixth key and the only list of parsed objects.
-7. **Two stale "sixth key" claims, now self-contradictory** (raised as a Minor by the Task 4 review). `Content-Type` is discussed as a candidate *sixth* inventory key in two places, and `cookies` has now taken that ordinal:
+1. **The output schema** — `inventory` gains `"cookies": []`; note it is the sixth key and the only list of parsed objects.
+1. **Two stale "sixth key" claims, now self-contradictory** (raised as a Minor by the Task 4 review). `Content-Type` is discussed as a candidate *sixth* inventory key in two places, and `cookies` has now taken that ordinal:
    - `CLAUDE.md` line ~316: "A sixth inventory key for it was designed on 2026-08-24 and deferred".
    - `http_security_test/response.py` line ~1220, the same claim inside `inventory()`'s docstring — two paragraphs below the new cookies paragraph that calls cookies the sixth.
-   Reword both to "a further inventory key" or "a seventh inventory key", whichever reads better in place. **Do not delete the Content-Type reasoning** — it is a recorded decision with a stated trigger (`Vary` as the next candidate), and only its ordinal is wrong.
-4. **Parked, with intent to do** — delete the whole `**`Set-Cookie` analysis**` item; it is done. Leave the two cache items, and update the cache/cookie item's opening: its stated blocker ("land it with the cookie parser") is now satisfied, so restate the remaining blocker as the `caching`-table contract.
-5. **Design principles** — principle 1 needs a sentence: a rating is a code's *default* and a finding may carry its own, which is SARIF's `result.level`.
-6. **Invariants the test suite pins** — the `identity()` bullet says "two cookies each missing `Secure` will be two more" in the future tense. It is now exercised; change the tense and name the test.
+     Reword both to "a further inventory key" or "a seventh inventory key", whichever reads better in place. **Do not delete the Content-Type reasoning** — it is a recorded decision with a stated trigger (`Vary` as the next candidate), and only its ordinal is wrong.
+1. **Parked, with intent to do** — delete the whole `**`Set-Cookie` analysis**` item; it is done. Leave the two cache items, and update the cache/cookie item's opening: its stated blocker ("land it with the cookie parser") is now satisfied, so restate the remaining blocker as the `caching`-table contract.
+1. **Design principles** — principle 1 needs a sentence: a rating is a code's *default* and a finding may carry its own, which is SARIF's `result.level`.
+1. **Invariants the test suite pins** — the `identity()` bullet says "two cookies each missing `Secure` will be two more" in the future tense. It is now exercised; change the tense and name the test.
 
 - [ ] **Step 7b: Fix the stacked-`which` prose (Task 7 review, Minor)**
 
@@ -2269,6 +2302,7 @@ python -m pytest tests/ -q
 ruff check
 python -c "import http_security_test, sys; assert 'http_security_test.cli' not in sys.modules"
 ```
+
 Expected: all pass. Record the final test count for CLAUDE.md.
 
 - [ ] **Step 9: End-to-end check against a real-shaped response**
@@ -2299,7 +2333,7 @@ Expected, and check each: `PHPSESSID` escalates to `warning` for all three gaps;
 
 Ready to commit: `cli/text.py`, `cli/commands.py`, `cli/options.py`, `CLAUDE.md`, the CLI tests and snapshot. Suggested message: `feat: render cookies in the CLI report`.
 
----
+______________________________________________________________________
 
 ## Notes for the executor
 

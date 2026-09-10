@@ -20,37 +20,40 @@
 - **NEVER run a git command that writes.** No `add`, `commit`, `stash`, `push`, `checkout -- <path>`, `restore`, `reset --hard`, `clean`. Each task ends at a **Checkpoint** for the human to review and commit. To restore a file you broke on purpose, copy it back from a backup you made outside the repo — never from git.
 - **Assume other agents are editing this tree.** Do not revert, tidy, or reformat files your task does not name.
 
----
+______________________________________________________________________
 
 ## File Structure
 
-| File | Responsibility |
-|---|---|
-| `http_security_test/message.py` | **Modified.** Gains `Request`, `Response`, the start-line parser and the `from_bytes`/`from_parts` constructors. Keeps the header-mapping helpers, which become the derived view rather than the front door. |
-| `http_security_test/exchange.py` | **New.** `Exchange`, `Connection`, the `FIDELITY` vocabulary, and the URL guard. |
-| `http_security_test/adaptors.py` | **New.** Named converters from live library objects. Imports nothing third-party. |
-| `http_security_test/response.py` | **Modified.** `analyze(exchange)` and `inventory(exchange)`; the status-line suppression. |
-| `http_security_test/reporting.py` | **Modified.** `report(exchange)`; `fidelity` in the output. |
-| `http_security_test/__init__.py` | **Modified.** Exports the core only. |
-| `http_security_test/cli/outcome.py` | **New, replacing `cli/exchange.py`.** `Hop`, `Failure`, `FAILURE_KINDS` — the run facts that stay CLI-side. |
-| `http_security_test/cli/live.py`, `commands.py`, `run.py` | **Modified.** Build analyser types directly; `secure()`/`host()` deleted. |
-| `tests/test_message_types.py` | **New.** Value types and `from_parts`. |
-| `tests/test_message_parser.py` | **New.** The byte parser, including hostile input. |
-| `tests/test_exchange.py` | **New.** `Exchange`, `Connection`, fidelity, the URL guard. |
-| `tests/test_adaptors.py` | **New.** Adaptors against fakes. |
-| `tests/test_headers.py` | **Modified.** ~105 call sites migrated to the new entry points. |
-| `tests/test_cli_*.py` | **Modified.** Renamed module, new call shapes. |
+| File                                                      | Responsibility                                                                                                                                                                                               |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `http_security_test/message.py`                           | **Modified.** Gains `Request`, `Response`, the start-line parser and the `from_bytes`/`from_parts` constructors. Keeps the header-mapping helpers, which become the derived view rather than the front door. |
+| `http_security_test/exchange.py`                          | **New.** `Exchange`, `Connection`, the `FIDELITY` vocabulary, and the URL guard.                                                                                                                             |
+| `http_security_test/adaptors.py`                          | **New.** Named converters from live library objects. Imports nothing third-party.                                                                                                                            |
+| `http_security_test/response.py`                          | **Modified.** `analyze(exchange)` and `inventory(exchange)`; the status-line suppression.                                                                                                                    |
+| `http_security_test/reporting.py`                         | **Modified.** `report(exchange)`; `fidelity` in the output.                                                                                                                                                  |
+| `http_security_test/__init__.py`                          | **Modified.** Exports the core only.                                                                                                                                                                         |
+| `http_security_test/cli/outcome.py`                       | **New, replacing `cli/exchange.py`.** `Hop`, `Failure`, `FAILURE_KINDS` — the run facts that stay CLI-side.                                                                                                  |
+| `http_security_test/cli/live.py`, `commands.py`, `run.py` | **Modified.** Build analyser types directly; `secure()`/`host()` deleted.                                                                                                                                    |
+| `tests/test_message_types.py`                             | **New.** Value types and `from_parts`.                                                                                                                                                                       |
+| `tests/test_message_parser.py`                            | **New.** The byte parser, including hostile input.                                                                                                                                                           |
+| `tests/test_exchange.py`                                  | **New.** `Exchange`, `Connection`, fidelity, the URL guard.                                                                                                                                                  |
+| `tests/test_adaptors.py`                                  | **New.** Adaptors against fakes.                                                                                                                                                                             |
+| `tests/test_headers.py`                                   | **Modified.** ~105 call sites migrated to the new entry points.                                                                                                                                              |
+| `tests/test_cli_*.py`                                     | **Modified.** Renamed module, new call shapes.                                                                                                                                                               |
 
----
+______________________________________________________________________
 
 ### Task 1: `Request` and `Response` value types
 
 **Files:**
+
 - Modify: `http_security_test/message.py`
 - Test: `tests/test_message_types.py` (create)
 
 **Interfaces:**
+
 - Consumes: nothing.
+
 - Produces: `message.Request(url, method=None, version=None, headers=(), body=None, raw=None, fidelity=None)`, `message.Response(status=None, reason=None, version=None, headers=(), body=None, raw=None, fidelity=None)`, `message.Request.from_parts(...)`, `message.Response.from_parts(...)`, and `message.mapping(headers)` returning the lowercased `name -> [values]` dict the analysers consume.
 
 - [ ] **Step 1: Write the failing test**
@@ -198,16 +201,19 @@ Expected: 561 passed — the 555 existing, untouched, plus the 6 new. ruff clean
 
 Report to the human: `message.py` gained `Request`, `Response` and `mapping()`; nothing else changed; full suite green. **Do not commit** — tell them this is a commit point and let them do it.
 
----
+______________________________________________________________________
 
 ### Task 2: The byte parser
 
 **Files:**
+
 - Modify: `http_security_test/message.py`
 - Test: `tests/test_message_parser.py` (create)
 
 **Interfaces:**
+
 - Consumes: `Request`, `Response`, `mapping` from Task 1.
+
 - Produces: `Request.from_bytes(data, url, fidelity=None)`, `Response.from_bytes(data, fidelity=None)`, and `message.parse_start_line(line)` returning `("request", method, target, version)` or `("response", version, status, reason)` or `None`.
 
 - [ ] **Step 1: Write the failing test**
@@ -459,16 +465,19 @@ Expected: 573 passed (561 + the 12 new), ruff clean
 
 Report the parser's leniency rules and the mutation result. **Do not commit.**
 
----
+______________________________________________________________________
 
 ### Task 3: `Exchange`, `Connection`, fidelity, and the URL guard
 
 **Files:**
+
 - Create: `http_security_test/exchange.py`
 - Test: `tests/test_exchange.py` (create)
 
 **Interfaces:**
+
 - Consumes: `Request`, `Response` from Tasks 1–2.
+
 - Produces: `exchange.Exchange(request, response, timestamp=None, connection=None)`, `exchange.Connection(host=None, ip=None, port=None, scheme=None)`, `exchange.FIDELITY` (a tuple), `exchange.scheme(url)`, `exchange.host(url)`, `exchange.url_was_mangled(url)`.
 
 - [ ] **Step 1: Write the failing test**
@@ -619,17 +628,20 @@ Expected: 580 passed (573 + the 7 new), ruff clean
 
 **Do not commit.** Note for the human that `scheme()`/`host()` here duplicate `cli/exchange.py`'s helpers on purpose for now; Task 6 deletes the CLI copies.
 
----
+______________________________________________________________________
 
 ### Task 4: `analyze(exchange)` and `inventory(exchange)`
 
 **Files:**
+
 - Modify: `http_security_test/response.py`
 - Modify: `tests/test_headers.py` (~105 call sites)
 - Test: `tests/test_headers.py`
 
 **Interfaces:**
+
 - Consumes: `Exchange`, `scheme`, `host` from Task 3; `mapping` from Task 1.
+
 - Produces: `response.analyze(exchange) -> [Finding]`, `response.inventory(exchange) -> dict`. Deletes `analyze_all`, the public `analyze(name, value)` (now `_analyze_header`), and the old `inventory(present)`.
 
 - [ ] **Step 1: Write the failing test**
@@ -698,7 +710,7 @@ Expected: FAIL — `ImportError: cannot import name 'analyze'` (the current `ana
 In `http_security_test/response.py`:
 
 1. Rename `def analyze(name, value)` to `def _analyze_header(name, value)` and update its call site inside the old `analyze_all` body.
-2. Replace `def analyze_all(present, secure=True, host=None)` with:
+1. Replace `def analyze_all(present, secure=True, host=None)` with:
 
 ```python
 def analyze(exchange):
@@ -727,18 +739,18 @@ from .message import mapping as _mapping
 
 3. Change `def inventory(present)` to `def inventory(exchange)` and make its first line `present = _normalize(_mapping(exchange.response.headers))`.
 
-4. In `http_security_test/__init__.py`, replace `analyze, analyze_all, inventory` in the `.response` import and in `__all__` with `analyze, inventory`.
+1. In `http_security_test/__init__.py`, replace `analyze, analyze_all, inventory` in the `.response` import and in `__all__` with `analyze, inventory`.
 
 - [ ] **Step 4: Migrate the existing call sites**
 
 `tests/test_headers.py` has ~60 `analyze_all(...)` and ~19 `inventory(...)` calls. Rewrite each mechanically:
 
-| was | becomes |
-|---|---|
-| `headers.analyze_all({...})` | `analyze(_ex({...}))` |
-| `headers.analyze_all({...}, secure=False)` | `analyze(_ex({...}, url="http://example.com/"))` |
-| `headers.analyze_all({...}, host="x.com")` | `analyze(_ex({...}, url="https://x.com/"))` |
-| `headers.inventory(X)` | `inventory(_ex(X))` |
+| was                                          | becomes                                               |
+| -------------------------------------------- | ----------------------------------------------------- |
+| `headers.analyze_all({...})`                 | `analyze(_ex({...}))`                                 |
+| `headers.analyze_all({...}, secure=False)`   | `analyze(_ex({...}, url="http://example.com/"))`      |
+| `headers.analyze_all({...}, host="x.com")`   | `analyze(_ex({...}, url="https://x.com/"))`           |
+| `headers.inventory(X)`                       | `inventory(_ex(X))`                                   |
 | `headers.analyze("X-Frame-Options", "DENY")` | `response._analyze_header("X-Frame-Options", "DENY")` |
 
 Do them in one pass and re-run after each file section, not at the end.
@@ -762,16 +774,19 @@ Write a throwaway script that runs every header mapping in `tests/test_headers.p
 
 Report the equivalence result with the case count. **Do not commit.**
 
----
+______________________________________________________________________
 
 ### Task 5: The status line stops the 301 false positive
 
 **Files:**
+
 - Modify: `http_security_test/response.py`
 - Test: `tests/test_headers.py`
 
 **Interfaces:**
+
 - Consumes: `analyze(exchange)` from Task 4.
+
 - Produces: no new names. `_report_missing` gains a `status` parameter.
 
 - [ ] **Step 1: Write the failing test**
@@ -880,17 +895,19 @@ Expected: analyser tests green, CLI tests still failing from Task 4, ruff clean
 
 **Do not commit.** Note that `--all-hops` remains parked; this only removes the reason it was blocked.
 
----
+______________________________________________________________________
 
 ### Task 6: Rename `cli/exchange.py` to `cli/outcome.py`
 
 **Files:**
+
 - Create: `http_security_test/cli/outcome.py`
 - Delete: `http_security_test/cli/exchange.py`
 - Modify: `http_security_test/cli/live.py`, `commands.py`, `run.py`
 - Modify: `tests/test_cli_exchange.py` → `tests/test_cli_outcome.py`, `tests/test_cli_run.py`, `tests/test_cli_text.py`, `tests/test_cli_live.py`, `tests/test_cli_scan.py`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: `cli.outcome.Hop`, `cli.outcome.Failure`, `cli.outcome.FAILURE_KINDS`. `cli.outcome` does **not** define an `Exchange`, `secure()` or `host()`.
 
@@ -941,16 +958,18 @@ Expected: same failures as after Task 5 and no new ones. A `ModuleNotFoundError`
 
 **Do not commit.**
 
----
+______________________________________________________________________
 
 ### Task 7: `report(exchange)` with fidelity, and the CLI rewired
 
 **Files:**
+
 - Modify: `http_security_test/reporting.py`
 - Modify: `http_security_test/cli/live.py`, `commands.py`, `run.py`
 - Test: `tests/test_headers.py`, `tests/test_cli_scan.py`, `tests/test_cli_run.py`
 
 **Interfaces:**
+
 - Consumes: `analyze`, `inventory` (Task 4); `Exchange`, `FIDELITY` (Task 3).
 - Produces: `reporting.report(exchange, message=True) -> dict`. Deletes the old signature entirely. `cli/live.py` now yields `Exchange` objects.
 
@@ -1091,16 +1110,19 @@ Expected: at least 1
 
 Report both command outputs. **Do not commit.**
 
----
+______________________________________________________________________
 
 ### Task 8: `adaptors.py`
 
 **Files:**
+
 - Create: `http_security_test/adaptors.py`
 - Test: `tests/test_adaptors.py` (create)
 
 **Interfaces:**
+
 - Consumes: `Request`, `Response` (Tasks 1–2).
+
 - Produces: `adaptors.from_http_client`, `from_requests`, `from_niquests`, `from_httpx`, `from_aiohttp`, `from_urllib3`, `from_tornado`, `from_curl_cffi`, `from_geventhttpclient`, `from_mitmproxy`, `from_scapy`, `from_werkzeug`, `from_starlette`, and `adaptors.http_version(value)`.
 
 - [ ] **Step 1: Write the failing test**
@@ -1375,18 +1397,21 @@ Expected: all green, ruff clean
 
 **Do not commit.**
 
----
+______________________________________________________________________
 
 ### Task 9: Layering, exports, and the docs
 
 **Files:**
+
 - Modify: `http_security_test/__init__.py`
 - Modify: `tests/test_cli_structure.py`
 - Modify: `CLAUDE.md`
 - Modify: `docs/TODO.md` — **NO.** `docs/TODO.md` says *"Human maintained notes, agents must not edit."* Leave it alone; tell the human which line is now done.
 
 **Interfaces:**
+
 - Consumes: everything above.
+
 - Produces: `__init__` exporting the core only; `test_cli_structure.py` enforcing a direction rule rather than a single-name check.
 
 - [ ] **Step 1: Write the failing test**
@@ -1478,12 +1503,12 @@ Expected: all passed
 Edit these sections, and no others:
 
 1. **Layout** — add `exchange.py` and `adaptors.py`; change `cli/exchange.py` to `cli/outcome.py` with its new one-line description.
-2. **Dependencies run one way** — replace the block with the four-layer direction rule and note that the test now enforces direction rather than a single name.
-3. **The header mapping (easy to get wrong)** — add the fourth row to the access table: `CaseInsensitiveDict[name]` → **comma-joined**, with the `Expires`-date example showing 3 pieces for 2 cookies.
-4. **The output schema** — add `fidelity` beside `raw` and the three-value vocabulary.
-5. **Parked, with intent to do** — strike `--all-hops`'s blocker (the status line is now read), and add the three newly-unblocked finding families: protocol hygiene, verb/preflight, TRACE/XST.
-6. **Working practices** — one sentence that `urllib.parse` is permitted in the analyser and `urllib.request` is not, since a reader will otherwise see `import urllib.parse` in `exchange.py` and call it a breach.
-7. **Status** — update the test count and note the new modules.
+1. **Dependencies run one way** — replace the block with the four-layer direction rule and note that the test now enforces direction rather than a single name.
+1. **The header mapping (easy to get wrong)** — add the fourth row to the access table: `CaseInsensitiveDict[name]` → **comma-joined**, with the `Expires`-date example showing 3 pieces for 2 cookies.
+1. **The output schema** — add `fidelity` beside `raw` and the three-value vocabulary.
+1. **Parked, with intent to do** — strike `--all-hops`'s blocker (the status line is now read), and add the three newly-unblocked finding families: protocol hygiene, verb/preflight, TRACE/XST.
+1. **Working practices** — one sentence that `urllib.parse` is permitted in the analyser and `urllib.request` is not, since a reader will otherwise see `import urllib.parse` in `exchange.py` and call it a breach.
+1. **Status** — update the test count and note the new modules.
 
 Do **not** rewrite the design principles; none of them changed.
 
@@ -1504,7 +1529,7 @@ Expected: `[]`
 
 Report the final test count, and tell the human that `docs/TODO.md`'s line *"change api to expect full request/response pairs first, break down for just response, just headers, etc."* is now done and is theirs to strike — an agent must not edit that file.
 
----
+______________________________________________________________________
 
 ## Self-Review
 

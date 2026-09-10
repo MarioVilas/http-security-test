@@ -70,8 +70,7 @@ Out, each for a stated reason:
 ## The module
 
 `cookies.py`, in `core`: standard library only, imports `findings` and
-`message`, imported by `response.py`. No new layer; `test_imports_only_ever_
-run_downhill` is unaffected.
+`message`, imported by `response.py`. No new layer; `test_imports_only_ever_ run_downhill` is unaffected.
 
 ```python
 Cookie = collections.namedtuple("Cookie", "name value attributes raw")
@@ -102,17 +101,17 @@ control character appears in the inventory in full and raises
 ### Parsing follows rfc6265bis 5.2 literally
 
 Read from `w3c/webref` `ed/algorithms/rfc6265bis.json`, algorithms [5] and
-[6]:
+\[6\]:
 
 1. Split the set-cookie-string at the first `;`. Everything before is the
    name-value-pair, everything after is unparsed-attributes.
-2. Split the name-value-pair at the **first** `=`. If there is no `=`, the
+1. Split the name-value-pair at the **first** `=`. If there is no `=`, the
    name is empty and the value is the whole string. (This is what makes
    `cookie-hidden-prefix` reachable.)
-3. Strip leading and trailing WSP from both.
-4. For each attribute: discard the `;`, take up to the next `;`, split at the
+1. Strip leading and trailing WSP from both.
+1. For each attribute: discard the `;`, take up to the next `;`, split at the
    first `=`, strip WSP, lowercase the attribute name.
-5. Unrecognised attribute names are kept, not dropped. The spec says a UA
+1. Unrecognised attribute names are kept, not dropped. The spec says a UA
    ignores them and both engines do; this package **reports** them, which is
    `cookie-unknown-attribute` below.
 
@@ -211,8 +210,7 @@ onto every finding, and the CLI's `--min-level` filters on `finding["level"]`
 out of the document, not on the code. Only the producer was per-code.
 
 `hst explain` prints the default. Codes whose level can be raised are listed in
-a new `ESCALATABLE` frozenset in `findings.py` and print as `note (may
-escalate)`, so the verb does not quietly misreport.
+a new `ESCALATABLE` frozenset in `findings.py` and print as `note (may escalate)`, so the verb does not quietly misreport.
 
 ## Findings
 
@@ -223,21 +221,20 @@ including suppressed ones. None of these is a judgement about sensitivity: each
 says the response asked for something it did not get, which is principle 3's
 definition of `error` and is true whatever the cookie holds.
 
-| code | fires when |
-|---|---|
-| `cookie-samesite-none-insecure` | `SameSite=None` without `Secure` |
-| `cookie-secure-over-plaintext` | `Secure` set from a non-trustworthy origin |
-| `cookie-prefix-violated` | a name prefix whose requirements are unmet |
-| `cookie-hidden-prefix` | nameless cookie whose value starts with a prefix |
-| `cookie-control-character` | a CTL character; the header is discarded |
-| `cookie-oversized` | name + value over 4096 octets; discarded |
-| `cookie-samesite-invalid` | a `SameSite` value that is not None/Lax/Strict |
-| `cookie-partitioned-insecure` | `Partitioned` without `Secure` |
-| `cookie-domain-mismatch` | `Domain` is not a suffix of the request host |
+| code                            | fires when                                       |
+| ------------------------------- | ------------------------------------------------ |
+| `cookie-samesite-none-insecure` | `SameSite=None` without `Secure`                 |
+| `cookie-secure-over-plaintext`  | `Secure` set from a non-trustworthy origin       |
+| `cookie-prefix-violated`        | a name prefix whose requirements are unmet       |
+| `cookie-hidden-prefix`          | nameless cookie whose value starts with a prefix |
+| `cookie-control-character`      | a CTL character; the header is discarded         |
+| `cookie-oversized`              | name + value over 4096 octets; discarded         |
+| `cookie-samesite-invalid`       | a `SameSite` value that is not None/Lax/Strict   |
+| `cookie-partitioned-insecure`   | `Partitioned` without `Secure`                   |
+| `cookie-domain-mismatch`        | `Domain` is not a suffix of the request host     |
 
 `data` carries the cookie name in every case, plus what the code needs:
-`cookie-prefix-violated` carries `{"prefix": "__Host-", "unmet":
-["path", "domain"]}`, `cookie-oversized` carries `{"octets": 5142}`,
+`cookie-prefix-violated` carries `{"prefix": "__Host-", "unmet": ["path", "domain"]}`, `cookie-oversized` carries `{"octets": 5142}`,
 `cookie-samesite-invalid` carries `{"value": "Strictt"}` -- with no `value` key
 at all for the bare-flag spelling `SameSite` with no `=`, since there is
 nothing to quote back and a placeholder read as `SameSite=(none)`, telling the
@@ -282,11 +279,11 @@ rules.
 `__Secure-`, and `__Host-Http-` is the conjunction of the two below it: a
 lattice, not a chain, so `__Host-` does **not** imply `HttpOnly`.
 
-| prefix | requires |
-|---|---|
-| `__Secure-` | `Secure`, on a trustworthy origin |
-| `__Http-` | `Secure` + `HttpOnly` |
-| `__Host-` | `Secure` + `Path=/` + no `Domain` |
+| prefix         | requires                                       |
+| -------------- | ---------------------------------------------- |
+| `__Secure-`    | `Secure`, on a trustworthy origin              |
+| `__Http-`      | `Secure` + `HttpOnly`                          |
+| `__Host-`      | `Secure` + `Path=/` + no `Domain`              |
 | `__Host-Http-` | `Secure` + `HttpOnly` + `Path=/` + no `Domain` |
 
 Three implementation traps, each verified rather than assumed:
@@ -389,8 +386,7 @@ for, so they cost no mechanism beyond the three they share.
 clock.** `Max-Age` with `delta-seconds <= 0`, and an `Expires` at or before the
 response's own `Date`, both ask a browser to discard the cookie immediately,
 which is the opposite of what this code reports. A Django-style logout response
--- `sessionid=""; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure;
-SameSite=Lax` -- is not "written to disk and outlives the session"; it is the
+-- `sessionid=""; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; SameSite=Lax` -- is not "written to disk and outlives the session"; it is the
 mechanism by which the session ends, and because `sessionid` is also on the
 escalation list, the loudest instance of getting this wrong would have landed
 on the single most common *correct* case on the web.
@@ -736,13 +732,13 @@ back. One less table to keep current.
 Three rungs -- `note`, `warning`, `error` -- which cost nothing now that a
 level is per finding.
 
-| signal | `Secure` | `HttpOnly` | `SameSite` | to |
-|---|---|---|---|---|
-| a misspelling of this attribute | escalate | escalate | escalate | `error` |
-| canonical session name | escalate | escalate | escalate | `warning` |
-| `__Secure-`/`__Host-`/`__Http-` prefix | escalate | escalate | escalate | `warning` |
-| `HttpOnly` already set | escalate | -- | escalate | `warning` |
-| name contains `csrf` / `xsrf` | escalate | **never** | escalate | `warning` |
+| signal                                 | `Secure` | `HttpOnly` | `SameSite` | to        |
+| -------------------------------------- | -------- | ---------- | ---------- | --------- |
+| a misspelling of this attribute        | escalate | escalate   | escalate   | `error`   |
+| canonical session name                 | escalate | escalate   | escalate   | `warning` |
+| `__Secure-`/`__Host-`/`__Http-` prefix | escalate | escalate   | escalate   | `warning` |
+| `HttpOnly` already set                 | escalate | --         | escalate   | `warning` |
+| name contains `csrf` / `xsrf`          | escalate | **never**  | escalate   | `warning` |
 
 **The columns are the three absence codes, and the other three read only the
 middle two rows.** `cookie-samesite-none`, `cookie-persistent` and
@@ -807,8 +803,7 @@ reason this table is per attribute rather than per cookie. A CSRF token cookie
 without `HttpOnly` is a *correct* configuration: the cookie-to-header pattern
 requires JavaScript to read it. OWASP's CSRF Prevention Cheat Sheet writes the
 counter-example as literal sample code --
-`response.setCookie("csrf_token=" + csrfToken + "; Secure") // Set Cookie
-without HttpOnly flag` (`:114`) -- and says of Angular's `XSRF-TOKEN` that it
+`response.setCookie("csrf_token=" + csrfToken + "; Secure") // Set Cookie without HttpOnly flag` (`:114`) -- and says of Angular's `XSRF-TOKEN` that it
 "is accessible via JavaScript (i.e., not `HttpOnly`)" (`:605`). All 24 rows in
 Open-Cookie-Database's `Security` category are CSRF tokens, so this is the
 rule and not an edge case. Escalating them for missing `HttpOnly` would be a
@@ -948,18 +943,18 @@ would ride alongside.
 
 Assignments:
 
-| code | consequences |
-|---|---|
-| `cookie-no-secure`, `cookie-secure-over-plaintext` | `mitm`, `session-theft` |
-| `cookie-no-httponly` | `session-theft` |
-| `cookie-no-samesite`, `cookie-samesite-invalid`, `cookie-samesite-none` | `csrf` |
-| `cookie-samesite-none-insecure` | `csrf`, `mitm` |
-| `cookie-prefix-violated`, `cookie-hidden-prefix` | `session-theft` |
-| `cookie-domain-broad`, `cookie-domain-mismatch` | `session-theft` |
-| `cookie-persistent` | `session-theft`, `cache-exposure` |
-| `cookie-control-character`, `cookie-oversized` | `()` |
-| `cookie-partitioned-insecure` | `()` |
-| `cookie-unknown-attribute` | `()` |
+| code                                                                    | consequences                      |
+| ----------------------------------------------------------------------- | --------------------------------- |
+| `cookie-no-secure`, `cookie-secure-over-plaintext`                      | `mitm`, `session-theft`           |
+| `cookie-no-httponly`                                                    | `session-theft`                   |
+| `cookie-no-samesite`, `cookie-samesite-invalid`, `cookie-samesite-none` | `csrf`                            |
+| `cookie-samesite-none-insecure`                                         | `csrf`, `mitm`                    |
+| `cookie-prefix-violated`, `cookie-hidden-prefix`                        | `session-theft`                   |
+| `cookie-domain-broad`, `cookie-domain-mismatch`                         | `session-theft`                   |
+| `cookie-persistent`                                                     | `session-theft`, `cache-exposure` |
+| `cookie-control-character`, `cookie-oversized`                          | `()`                              |
+| `cookie-partitioned-insecure`                                           | `()`                              |
+| `cookie-unknown-attribute`                                              | `()`                              |
 
 The last four are empty and that is a result, not an omission. A discarded
 cookie and a rejected `Partitioned` attribute both fail closed: nothing is
@@ -1110,57 +1105,57 @@ works, and it is also what would let a future attribute name shaped like
 
 Everything below was read on disk during the design, not recalled.
 
-| claim | source |
-|---|---|
-| `SameSite` default is Lax in Chrome only | BCD `Set-Cookie.json` `SameSite.Lax_default`: Chrome 80 / Firefox 69 flag / Safari false |
-| `SameSite=None` requires `Secure` | BCD `SameSite.none_requires_secure`: 80 / 131 / false; layered-cookies step 12 |
-| `__Secure-`/`__Host-` are universal | BCD `host_secure_prefixes`: 49 / 50 / 13 |
-| `__Http-`/`__Host-Http-` are not | BCD `http_host-http_prefixes`: 140 / 143 / false |
-| `Partitioned` support | BCD: Chrome 114 / Firefox 141 / Safari 26.2 |
-| four prefixes, longest-first, case-insensitive, all require a secure request | `netwerk/cookie/CookiePrefixes.cpp`; `net/cookies/cookie_util.cc:342,786,818` |
-| `__Host-` tolerates `Domain` for IP-literal hosts | `cookie_util.cc:120` |
-| a `Secure` cookie from a plaintext origin is not stored | `net/cookies/cookie_base.cc:124`; `netwerk/cookie/CookieService.cpp:1038` |
-| localhost is trustworthy | `cookie_util.cc:709` |
-| hidden prefix in the value of a nameless cookie | `cookie_util.cc:796`; layered-cookies step 17 |
-| CTL or over-4096 discards the header | rfc6265bis algorithm [5] |
-| an unknown `SameSite` becomes `Default` | rfc6265bis algorithm [11] |
-| CSRF cookies are deliberately not `HttpOnly` | `Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.md:114,605` |
-| 29% of `session`-named cookies are analytics or marketing | Open-Cookie-Database, 28 of 98 of 2266 |
-| all 24 `Security`-category cookies are CSRF tokens | Open-Cookie-Database |
-| `*_session` is 65% precise, `*_sess` 50%, `*sessid` 50% | Open-Cookie-Database, hand-judged; analytics name visit-sessions alike |
-| `jwt` appears nowhere in the 2266 rows; `token` is Adform's | Open-Cookie-Database |
-| `PLAY_SESSION` is Play Framework's, not LinkedIn's | Open-Cookie-Database attribution error, third found |
-| `rack.session` is Rack's | Open-Cookie-Database, Platform "Rack" |
-| Keycloak: `KEYCLOAK_SESSION`, `AUTH_SESSION_ID(_LEGACY)` | Open-Cookie-Database, Platform "Keycloak" |
-| Gitea: session `i_like_gitea`, remember-me `gitea_incredible` | `modules/setting/session.go`; config cheat sheet, read 2026-08-31 |
-| Etherpad: `express_sid` | docs.etherpad.org/cookies.html, read 2026-08-31 |
-| Nextcloud: `nc_token`/`nc_session_id`/`oc_sessionPassphrase` fixed; ordinary session is the instance id | Nextcloud GDPR cookies doc, read 2026-08-31 |
-| Grafana: `grafana_session`, open source included | Grafana auth config doc, read 2026-08-31 |
-| DokuWiki's cookie names could not be read (HTTP 402) | dokuwiki.org/faq:cookies |
-| OIDC says the OP state cookie likely cannot be `HttpOnly` | OpenID Connect Session Management 1.0, read 2026-08-31 |
-| OIDC standardises no cookie name (cookie or localStorage) | same |
-| CRS ships no XenForo cookie rules on disk | `coreruleset`: XenForo only in `CHANGES.md`; cpanel hits are LFI paths |
-| `xf_session`, `xf_tfa_trust`, `xf_csrf` are XenForo's | Open-Cookie-Database, Platform "Xenforo" |
-| no on-disk source carries `cpsession` or `whostmgrsession` | queried OCD, Wappalyzer, WhatWeb, CRS |
-| 4 of 8 names ending in `sessid` are not session tokens | Open-Cookie-Database; Qualtrics x2, Matomo, Magento cache |
-| `CGISESSID` is Perl `CGI::Session`'s default | Open-Cookie-Database, Platform "Perl" |
-| `PLESKSESSID` is Plesk's, `wordpress_logged_in_` is WordPress's | Open-Cookie-Database, `Wildcard match=1` on the latter |
-| exact `sessid` appears in none of the 2266 rows | Open-Cookie-Database |
-| OCD categories are privacy purposes, not token judgements | `sessionid`=Instagram/Marketing; `sid`=Google/Marketing |
-| OCD `Platform` is where-observed, not who-defines | `connect.sid` attributed to Zendesk, not Express |
-| ZAP's token list is cookies AND parameters, not cookies | `ScannerParam.java:336` registers `__VIEWSTATE` as `TYPE_POST_DATA` |
-| ZAP's token list originates in one batch of six, no rationale | `zaproxy` `8f7573bc4`, 2012-02-18, `SessionParam.java` |
-| Zen Cart is a live platform, not a dead one | Wappalyzer `z.json:156`; WhatWeb `plugins/zen-cart.rb` |
-| `zenid` / `siteserver` are absent from Open-Cookie-Database | queried during review; one on-disk source each (ZAP) |
-| ZAP flags every cookie and mutes by list | `CookieSecureFlagScanRule.java:89`; `HttpSessionsParam.java:55` |
-| ZAP judges `Domain` breadth with no PSL | `CookieLooselyScopedScanRule.java:144` |
-| humble re-splits a joined `Set-Cookie` | `humble.py:1437,5388` |
-| securityheaders' prefix branches are unreachable | `checkers/setcookie/requiressecurity.py` |
-| Chromium recognises nine attribute names, including `priority` | `net/cookies/parsed_cookie.cc:62-70,695` |
-| Firefox recognises eight, without `priority` | `netwerk/cookie/CookieParser.cpp:306-315` |
-| `SameParty` is gone from both engines | absent from `parsed_cookie.cc`; First-Party Sets abandoned |
-| 8 of 21 realistic typos are Damerau 1 but Levenshtein 2 | computed during design; all 8 transpositions |
-| no real attribute name is within Damerau 1 of the recognised nine | probed against RFC 2965's five plus `sameparty`; nearest is 3 |
+| claim                                                                                                   | source                                                                                   |
+| ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `SameSite` default is Lax in Chrome only                                                                | BCD `Set-Cookie.json` `SameSite.Lax_default`: Chrome 80 / Firefox 69 flag / Safari false |
+| `SameSite=None` requires `Secure`                                                                       | BCD `SameSite.none_requires_secure`: 80 / 131 / false; layered-cookies step 12           |
+| `__Secure-`/`__Host-` are universal                                                                     | BCD `host_secure_prefixes`: 49 / 50 / 13                                                 |
+| `__Http-`/`__Host-Http-` are not                                                                        | BCD `http_host-http_prefixes`: 140 / 143 / false                                         |
+| `Partitioned` support                                                                                   | BCD: Chrome 114 / Firefox 141 / Safari 26.2                                              |
+| four prefixes, longest-first, case-insensitive, all require a secure request                            | `netwerk/cookie/CookiePrefixes.cpp`; `net/cookies/cookie_util.cc:342,786,818`            |
+| `__Host-` tolerates `Domain` for IP-literal hosts                                                       | `cookie_util.cc:120`                                                                     |
+| a `Secure` cookie from a plaintext origin is not stored                                                 | `net/cookies/cookie_base.cc:124`; `netwerk/cookie/CookieService.cpp:1038`                |
+| localhost is trustworthy                                                                                | `cookie_util.cc:709`                                                                     |
+| hidden prefix in the value of a nameless cookie                                                         | `cookie_util.cc:796`; layered-cookies step 17                                            |
+| CTL or over-4096 discards the header                                                                    | rfc6265bis algorithm [5]                                                                 |
+| an unknown `SameSite` becomes `Default`                                                                 | rfc6265bis algorithm [11]                                                                |
+| CSRF cookies are deliberately not `HttpOnly`                                                            | `Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.md:114,605`                           |
+| 29% of `session`-named cookies are analytics or marketing                                               | Open-Cookie-Database, 28 of 98 of 2266                                                   |
+| all 24 `Security`-category cookies are CSRF tokens                                                      | Open-Cookie-Database                                                                     |
+| `*_session` is 65% precise, `*_sess` 50%, `*sessid` 50%                                                 | Open-Cookie-Database, hand-judged; analytics name visit-sessions alike                   |
+| `jwt` appears nowhere in the 2266 rows; `token` is Adform's                                             | Open-Cookie-Database                                                                     |
+| `PLAY_SESSION` is Play Framework's, not LinkedIn's                                                      | Open-Cookie-Database attribution error, third found                                      |
+| `rack.session` is Rack's                                                                                | Open-Cookie-Database, Platform "Rack"                                                    |
+| Keycloak: `KEYCLOAK_SESSION`, `AUTH_SESSION_ID(_LEGACY)`                                                | Open-Cookie-Database, Platform "Keycloak"                                                |
+| Gitea: session `i_like_gitea`, remember-me `gitea_incredible`                                           | `modules/setting/session.go`; config cheat sheet, read 2026-08-31                        |
+| Etherpad: `express_sid`                                                                                 | docs.etherpad.org/cookies.html, read 2026-08-31                                          |
+| Nextcloud: `nc_token`/`nc_session_id`/`oc_sessionPassphrase` fixed; ordinary session is the instance id | Nextcloud GDPR cookies doc, read 2026-08-31                                              |
+| Grafana: `grafana_session`, open source included                                                        | Grafana auth config doc, read 2026-08-31                                                 |
+| DokuWiki's cookie names could not be read (HTTP 402)                                                    | dokuwiki.org/faq:cookies                                                                 |
+| OIDC says the OP state cookie likely cannot be `HttpOnly`                                               | OpenID Connect Session Management 1.0, read 2026-08-31                                   |
+| OIDC standardises no cookie name (cookie or localStorage)                                               | same                                                                                     |
+| CRS ships no XenForo cookie rules on disk                                                               | `coreruleset`: XenForo only in `CHANGES.md`; cpanel hits are LFI paths                   |
+| `xf_session`, `xf_tfa_trust`, `xf_csrf` are XenForo's                                                   | Open-Cookie-Database, Platform "Xenforo"                                                 |
+| no on-disk source carries `cpsession` or `whostmgrsession`                                              | queried OCD, Wappalyzer, WhatWeb, CRS                                                    |
+| 4 of 8 names ending in `sessid` are not session tokens                                                  | Open-Cookie-Database; Qualtrics x2, Matomo, Magento cache                                |
+| `CGISESSID` is Perl `CGI::Session`'s default                                                            | Open-Cookie-Database, Platform "Perl"                                                    |
+| `PLESKSESSID` is Plesk's, `wordpress_logged_in_` is WordPress's                                         | Open-Cookie-Database, `Wildcard match=1` on the latter                                   |
+| exact `sessid` appears in none of the 2266 rows                                                         | Open-Cookie-Database                                                                     |
+| OCD categories are privacy purposes, not token judgements                                               | `sessionid`=Instagram/Marketing; `sid`=Google/Marketing                                  |
+| OCD `Platform` is where-observed, not who-defines                                                       | `connect.sid` attributed to Zendesk, not Express                                         |
+| ZAP's token list is cookies AND parameters, not cookies                                                 | `ScannerParam.java:336` registers `__VIEWSTATE` as `TYPE_POST_DATA`                      |
+| ZAP's token list originates in one batch of six, no rationale                                           | `zaproxy` `8f7573bc4`, 2012-02-18, `SessionParam.java`                                   |
+| Zen Cart is a live platform, not a dead one                                                             | Wappalyzer `z.json:156`; WhatWeb `plugins/zen-cart.rb`                                   |
+| `zenid` / `siteserver` are absent from Open-Cookie-Database                                             | queried during review; one on-disk source each (ZAP)                                     |
+| ZAP flags every cookie and mutes by list                                                                | `CookieSecureFlagScanRule.java:89`; `HttpSessionsParam.java:55`                          |
+| ZAP judges `Domain` breadth with no PSL                                                                 | `CookieLooselyScopedScanRule.java:144`                                                   |
+| humble re-splits a joined `Set-Cookie`                                                                  | `humble.py:1437,5388`                                                                    |
+| securityheaders' prefix branches are unreachable                                                        | `checkers/setcookie/requiressecurity.py`                                                 |
+| Chromium recognises nine attribute names, including `priority`                                          | `net/cookies/parsed_cookie.cc:62-70,695`                                                 |
+| Firefox recognises eight, without `priority`                                                            | `netwerk/cookie/CookieParser.cpp:306-315`                                                |
+| `SameParty` is gone from both engines                                                                   | absent from `parsed_cookie.cc`; First-Party Sets abandoned                               |
+| 8 of 21 realistic typos are Damerau 1 but Levenshtein 2                                                 | computed during design; all 8 transpositions                                             |
+| no real attribute name is within Damerau 1 of the recognised nine                                       | probed against RFC 2965's five plus `sameparty`; nearest is 3                            |
 
 Two things that could not be answered from disk, recorded so they are not
 re-searched:

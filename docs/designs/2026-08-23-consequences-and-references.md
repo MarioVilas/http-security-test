@@ -120,16 +120,16 @@ Eight slugs. Deliberately coarse: this is a **hint about potential risk, not a
 detection**, so a slug names a class of harm rather than claiming one is
 reachable. The rendered sentence for each says so in as many words.
 
-| slug | CWE | CAPEC |
-|---|---|---|
-| `xss` | CWE-79 | CAPEC-63 |
-| `clickjacking` | CWE-1021 | CAPEC-103 |
-| `mitm` | CWE-319 | CAPEC-117 |
-| `data-disclosure` | CWE-200 | — |
-| `cors-data-theft` | CWE-942 | — |
-| `cache-exposure` | CWE-525 | CAPEC-204 |
-| `cross-origin-leak` | — | CAPEC-663 |
-| `permission-abuse` | CWE-732 | — |
+| slug                | CWE      | CAPEC     |
+| ------------------- | -------- | --------- |
+| `xss`               | CWE-79   | CAPEC-63  |
+| `clickjacking`      | CWE-1021 | CAPEC-103 |
+| `mitm`              | CWE-319  | CAPEC-117 |
+| `data-disclosure`   | CWE-200  | —         |
+| `cors-data-theft`   | CWE-942  | —         |
+| `cache-exposure`    | CWE-525  | CAPEC-204 |
+| `cross-origin-leak` | —        | CAPEC-663 |
+| `permission-abuse`  | CWE-732  | —         |
 
 Exact names, read from `tmp/cwec_v4.20.xml` and
 `ref/documentation/cti/capec/2.1/stix-capec.json` on 2026-08-23:
@@ -270,11 +270,13 @@ re-proposed:
 - **CWE-293 *Using Referer Field for Authentication*** is the only referrer CWE
   and points the wrong way: it is the *server trusting* `Referer`, not a page
   leaking one. `data-disclosure` takes CWE-200.
+
 - **CWE-668 *Exposure of Resource to Wrong Sphere*** reads like the missing
   `cross-origin-leak` id — CWE's "control sphere" is nearly an origin. But
   **CWE-200 is a direct `ChildOf` CWE-668**, so pairing them would put our
   narrower concept on the parent class and our broader one on the child,
   asserting a containment we do not mean. Better a gap than a backwards id.
+
 - **CAPEC-468 *Generic Cross-Browser Cross-Domain Theft*** reads like
   `cors-data-theft` and is CSS-injection data theft. The join settles it:
   **zero CAPEC patterns reference CWE-942.**
@@ -308,11 +310,11 @@ pattern beneath CAPEC-63 `Standard`.
 Verified starting entries, so the overlay is not an empty dict pretending to be
 a design:
 
-| code | id | why it beats the slug's |
-|---|---|---|
-| `xcto-missing` | CAPEC-209 | *XSS Using MIME Type Mismatch* — the exact mechanism |
+| code                             | id        | why it beats the slug's                                             |
+| -------------------------------- | --------- | ------------------------------------------------------------------- |
+| `xcto-missing`                   | CAPEC-209 | *XSS Using MIME Type Mismatch* — the exact mechanism                |
 | `hsts-missing`, `hsts-malformed` | CAPEC-102 | *Session Sidejacking* — the specific loss, not generic interception |
-| `xfo-*`, `csp-frame-ancestors-*` | CAPEC-222 | *iFrame Overlay*, joins CWE-1021 |
+| `xfo-*`, `csp-frame-ancestors-*` | CAPEC-222 | *iFrame Overlay*, joins CWE-1021                                    |
 
 **What this costs, stated so it is not later "fixed".** A sparse table cannot be
 a bijection, unlike `CODE_HEADER`, `FINDING_SEVERITY` and `MESSAGES` beside it.
@@ -383,8 +385,7 @@ reporting  ->  response, findings, catalog
 cli.commands  ->  ... + CODE_HEADER, CONSEQUENCES, consequences, references, taxonomy
 ```
 
-**Corrected 2026-08-24.** This block originally read `findings, message,
-catalog, references -> (nothing)`, filing `findings.py` as a leaf outright. It
+**Corrected 2026-08-24.** This block originally read `findings, message, catalog, references -> (nothing)`, filing `findings.py` as a leaf outright. It
 is not one: `taxonomy()` imports `catalog` -- lazily, and with a comment that
 (also wrongly) called a module-scope import a cycle. It would not have been
 one either, since `catalog.py` imports nothing from this package; the real
@@ -458,11 +459,11 @@ is not hypothetical — it is exactly how `Feature-Policy` disappeared.
 **Three of the ten have an official permanent source**, verified on disk in
 `known-http-header-db`'s `specifications[]` and `rfc-library`:
 
-| header | source |
-|---|---|
-| `Public-Key-Pins` | RFC 7469, `status: permanent` in the db |
-| `Public-Key-Pins-Report-Only` | RFC 7469, same document |
-| `P3P` | `https://www.w3.org/TR/P3P`, a W3C Recommendation nothing supersedes |
+| header                        | source                                                               |
+| ----------------------------- | -------------------------------------------------------------------- |
+| `Public-Key-Pins`             | RFC 7469, `status: permanent` in the db                              |
+| `Public-Key-Pins-Report-Only` | RFC 7469, same document                                              |
+| `P3P`                         | `https://www.w3.org/TR/P3P`, a W3C Recommendation nothing supersedes |
 
 **Seven have no official source.** Two are the COOP and COEP report-only
 siblings, documented by neither MDN nor a spec of their own. `X-Content-Security-Policy` and
@@ -570,16 +571,16 @@ consequences: xss -- Cross-site scripting (CWE-79, CAPEC-63)
 
 1. `CODE_HEADER` + its tests. Self-contained, closes a parked item, no schema
    change. Ships alone if the rest slips.
-2. `references.py` + helpers + shape tests.
-3. `Consequence` namedtuple, `CONSEQUENCES` in `catalog.py`, empty
+1. `references.py` + helpers + shape tests.
+1. `Consequence` namedtuple, `CONSEQUENCES` in `catalog.py`, empty
    `CODE_CONSEQUENCES` in `findings.py`, bijection tests failing.
-4. Map all 102 codes; tests go green.
-5. `CODE_TAXONOMY` overlay, seeded with the verified entries above and whatever
+1. Map all 102 codes; tests go green.
+1. `CODE_TAXONOMY` overlay, seeded with the verified entries above and whatever
    a pass over CAPEC per header family turns up.
-6. `reporting.py`: `consequences` per finding, the `references` block.
-7. `cli/text.py` rendering; regenerate the terminal snapshot.
-8. `cli/commands.py`: `explain`.
-9. `__init__.py` exports; CLAUDE.md.
+1. `reporting.py`: `consequences` per finding, the `references` block.
+1. `cli/text.py` rendering; regenerate the terminal snapshot.
+1. `cli/commands.py`: `explain`.
+1. `__init__.py` exports; CLAUDE.md.
 
 ## 9. For CLAUDE.md when this lands
 

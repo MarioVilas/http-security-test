@@ -50,8 +50,7 @@ unhonoured.
 - **`re-invalid`** covers the case this document previously left open as "low
   priority". Structured field dictionary keys are lower-case by grammar
   (RFC 9651 §3.2), and **both engines drop the entire header** when the
-  dictionary will not parse — Firefox `SFV::ParseDict(...); if
-  (!dict.IsValid()) return 0;`, Chromium `ParseDictionary` returning `nullopt`.
+  dictionary will not parse — Firefox `SFV::ParseDict(...); if (!dict.IsValid()) return 0;`, Chromium `ParseDictionary` returning `nullopt`.
   So `CSP-EP="https://…"` costs every group the header meant to define, and the
   policies naming those groups are not blamed for it.
 - **Both definers are inventoried and neither is ever reported missing**, so
@@ -80,16 +79,16 @@ inventory mechanism at the end of this document.
 
 Status of the six items that came out of that review:
 
-| # | Item | Disposition |
-|---|---|---|
-| 1 | `Reporting-Endpoints` cross-check for CSP / COOP / COEP | **accepted** — item A below |
-| 2 | Endpoint URL the browser discards | **folded into A** — see DECISION A-1; it is not a separate feature |
-| 3 | `Access-Control-Allow-Origin` that is not a serialized origin | **accepted** — item B below |
-| 4 | `Connection` naming an end-to-end header | dropped |
-| 5 | `Document-Isolation-Policy` | parked — item C below, and Chromium changed *why* |
-| 6 | `Origin-Agent-Cluster`, `Report-To` | dropped (not security) |
+| #   | Item                                                          | Disposition                                                        |
+| --- | ------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 1   | `Reporting-Endpoints` cross-check for CSP / COOP / COEP       | **accepted** — item A below                                        |
+| 2   | Endpoint URL the browser discards                             | **folded into A** — see DECISION A-1; it is not a separate feature |
+| 3   | `Access-Control-Allow-Origin` that is not a serialized origin | **accepted** — item B below                                        |
+| 4   | `Connection` naming an end-to-end header                      | dropped                                                            |
+| 5   | `Document-Isolation-Policy`                                   | parked — item C below, and Chromium changed *why*                  |
+| 6   | `Origin-Agent-Cluster`, `Report-To`                           | dropped (not security)                                             |
 
----
+______________________________________________________________________
 
 ## Item A — a reporting group nothing defines
 
@@ -247,8 +246,7 @@ narrower than either engine's own rule:
   first is a false positive against Firefox, the second lets Chromium's
   behaviour go unreported. **Fire only on what both engines reject** — an
   absolute URL with a non-cryptographic scheme whose host is not loopback.
-- **Relative URLs are resolved, not rejected**, in both engines — `NS_NewURI(...,
-  baseURL)` in Firefox, `header_origin.GetURL().Resolve(...)` in Chromium. So
+- **Relative URLs are resolved, not rejected**, in both engines — `NS_NewURI(..., baseURL)` in Firefox, `header_origin.GetURL().Resolve(...)` in Chromium. So
   `csp-endpoint="/reports"` is a perfectly good endpoint and must never fire.
 - **Chromium discards the whole header on one bad member.**
   `ParseReportingEndpoints()` returns `std::nullopt` — dropping *every* group,
@@ -382,13 +380,13 @@ rather than inherited.
 **Codes.** One per header, because a code belongs to exactly one header and
 `duplicate-headers` is the only exemption:
 
-| Code | Header | Level |
-|---|---|---|
-| `csp-report-to-undefined` | `Content-Security-Policy` | `note` |
-| `coop-report-to-undefined` | `Cross-Origin-Opener-Policy` | `note` |
-| `coep-report-to-undefined` | `Cross-Origin-Embedder-Policy` | `note` |
-| `re-endpoint-undeliverable` | `Reporting-Endpoints` | `note` |
-| `re-ineffective` | `Reporting-Endpoints` | `note` |
+| Code                        | Header                         | Level  |
+| --------------------------- | ------------------------------ | ------ |
+| `csp-report-to-undefined`   | `Content-Security-Policy`      | `note` |
+| `coop-report-to-undefined`  | `Cross-Origin-Opener-Policy`   | `note` |
+| `coep-report-to-undefined`  | `Cross-Origin-Embedder-Policy` | `note` |
+| `re-endpoint-undeliverable` | `Reporting-Endpoints`          | `note` |
+| `re-ineffective`            | `Reporting-Endpoints`          | `note` |
 
 Nothing here is `error`, because nothing is ignored by the browser and nothing
 is permitted that should not be. Revision 2 rated the first three `warning`, on
@@ -469,7 +467,7 @@ outside quoted strings, with a test and a killed mutation. The lowercase-key
 case is deliberately still open and is the only thing in this document left
 unaddressed on purpose.
 
----
+______________________________________________________________________
 
 ## Item B — an ACAO value that is not a serialized origin
 
@@ -592,7 +590,7 @@ for reporting it anyway:
    outright, which fails closed, but it also means the CORS the operator
    configured is not happening at all." Reporting one and not the other is an
    accident of which shape happened to be implemented.
-2. It is a leading indicator of the real vulnerability. A developer who writes
+1. It is a leading indicator of the real vulnerability. A developer who writes
    `https://*.example.com`, finds CORS broken, and needs it working by Friday
    very often "fixes" it by reflecting the `Origin` header back — which is the
    origin-reflection defect the parked active check exists to catch. The
@@ -682,8 +680,8 @@ One branch in `_analyze_acao()` in `isolation.py`, before the final
 `return []`. This stays a single-header rule — it needs no sibling — so it does
 not move to `response.py`.
 
-| Code | Header | Level | Data |
-|---|---|---|---|
+| Code                  | Header                        | Level         | Data                     |
+| --------------------- | ----------------------------- | ------------- | ------------------------ |
 | `acao-invalid-origin` | `Access-Control-Allow-Origin` | `error` (B-1) | `{"value": "<as sent>"}` |
 
 `{"value": ...}` matches what `acao-multiple-origins` already carries.
@@ -691,7 +689,7 @@ not move to `response.py`.
 Draft message: "present but {value} is not a serialized origin, so no browser
 can match it and every cross-origin request is rejected".
 
----
+______________________________________________________________________
 
 ## Item C — `Document-Isolation-Policy`, parked as a watch item
 
@@ -747,7 +745,7 @@ point the balance inverts and it becomes a suppression in
 fourth `report-to` group to cross-check under item A, since the Chromium parser
 above already accepts one.
 
----
+______________________________________________________________________
 
 ## Testing
 
@@ -756,17 +754,21 @@ Standard for this project, plus the two things that have paid for themselves:
 - **Corpus first.** Every new code needs a case in `tests/`, or the
   completeness tests — every emittable code has a rating and a template, and
   every rated code is emittable — pass vacuously.
+
 - **Mutation-test each new guard.** Break it, confirm the test fails, restore.
   Specifically worth mutating: the trustworthiness predicate if DECISION A-1
   takes Option 1 (a guard that returns the wrong empty value survives every
   mutation when the only caller tests truthiness — that has happened here
   before), and each clause of the ACAO predicate independently, since a
   five-clause `or` passes its test with four clauses dead.
+
 - **A4 and B4 are the point.** The negative cases are load-bearing; a version
   of this that fires on A4 is worse than not shipping it.
+
 - **Behavioural equivalence for the ACAO change.** `git show HEAD:http_security_test/isolation.py`
   into the scratchpad, run the corpus through both, diff the `(header, code)`
   sets. The only difference should be the new code on the new cases.
+
 - **Regenerate the snapshot deliberately and read the diff**, especially under
   DECISION A-1 Option 1, which edits an existing sentence:
 

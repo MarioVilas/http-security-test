@@ -25,25 +25,26 @@
 SCRATCH=$(mktemp -d); cp module.py "$SCRATCH/"   # ...mutate, run the suite...
 cp "$SCRATCH/module.py" module.py
 ```
+
 - **Tables are tuples, never sets.** A set literal reorders output per process and breaks determinism.
 - **Analysers must not import `catalog.py` or `references.py`.** A test walks the AST to enforce the `cli` direction; keep the same discipline here.
 - **Consequence slugs are the eight in the spec and no others:** `xss`, `clickjacking`, `mitm`, `data-disclosure`, `cors-data-theft`, `cache-exposure`, `cross-origin-leak`, `permission-abuse`.
 
 ## File Structure
 
-| file | responsibility | change |
-|---|---|---|
-| `http_security_test/findings.py` | code-keyed policy tables | add `CODE_HEADER`, `CODE_CONSEQUENCES`, `CODE_TAXONOMY`, `consequences()` |
-| `http_security_test/catalog.py` | all prose | add `Consequence`, `CONSEQUENCES` |
-| `http_security_test/references.py` | **new leaf** — external URLs | `HEADER_DOCS`, `header_url()`, `taxonomy_url()` |
-| `http_security_test/reporting.py` | plain-data report | `consequences` per finding, `references` block |
-| `http_security_test/__init__.py` | public API | export the new names |
-| `http_security_test/cli/text.py` | terminal render | append `[slug, slug]` to a finding line |
-| `http_security_test/cli/commands.py` | `explain` verb | print header, consequences, URLs |
-| `tests/test_headers.py` | analyser + catalog tests | new sections for each table |
-| `tests/test_references.py` | **new** | URL derivation |
-| `tests/test_cli_explain.py` | `explain` output | extend |
-| `tests/cli_terminal_snapshot.txt` | pinned terminal output | regenerate |
+| file                                 | responsibility               | change                                                                    |
+| ------------------------------------ | ---------------------------- | ------------------------------------------------------------------------- |
+| `http_security_test/findings.py`     | code-keyed policy tables     | add `CODE_HEADER`, `CODE_CONSEQUENCES`, `CODE_TAXONOMY`, `consequences()` |
+| `http_security_test/catalog.py`      | all prose                    | add `Consequence`, `CONSEQUENCES`                                         |
+| `http_security_test/references.py`   | **new leaf** — external URLs | `HEADER_DOCS`, `header_url()`, `taxonomy_url()`                           |
+| `http_security_test/reporting.py`    | plain-data report            | `consequences` per finding, `references` block                            |
+| `http_security_test/__init__.py`     | public API                   | export the new names                                                      |
+| `http_security_test/cli/text.py`     | terminal render              | append `[slug, slug]` to a finding line                                   |
+| `http_security_test/cli/commands.py` | `explain` verb               | print header, consequences, URLs                                          |
+| `tests/test_headers.py`              | analyser + catalog tests     | new sections for each table                                               |
+| `tests/test_references.py`           | **new**                      | URL derivation                                                            |
+| `tests/test_cli_explain.py`          | `explain` output             | extend                                                                    |
+| `tests/cli_terminal_snapshot.txt`    | pinned terminal output       | regenerate                                                                |
 
 Dependency direction after this work — still acyclic, `references` a leaf:
 
@@ -52,18 +53,20 @@ findings, message, catalog, references  ->  (nothing)
 reporting  ->  response, findings, catalog, references
 ```
 
----
+______________________________________________________________________
 
 ### Task 1: `CODE_HEADER`
 
 Closes the parked "public code-to-header table" item. Self-contained: no schema change, no other table depends on it. Ships alone if the rest slips.
 
 **Files:**
+
 - Modify: `http_security_test/findings.py` (after `FINDING_SEVERITY`)
 - Modify: `http_security_test/__init__.py`
 - Modify: `tests/test_headers.py` (replace `test_each_code_belongs_to_exactly_one_header` at line 777)
 
 **Interfaces:**
+
 - Produces: `CODE_HEADER: dict[str, str | None]` — every emittable code to its canonical header name, `None` for `duplicate-headers`.
 
 - [ ] **Step 1: Generate the table**
@@ -200,18 +203,22 @@ Write your report to the report file named in your dispatch, listing the
 files you touched, the commands you ran and their output. Return the short
 status contract only.
 
----
+______________________________________________________________________
 
 ### Task 2: `references.py`
 
 **Files:**
+
 - Create: `http_security_test/references.py`
 - Create: `tests/test_references.py`
 - Modify: `http_security_test/__init__.py`
 
 **Interfaces:**
+
 - Consumes: nothing.
+
 - Produces:
+
   - `HEADER_DOCS: dict[str, str]` — canonical header name to documentation URL.
   - `header_url(name: str) -> str | None` — case-insensitive lookup.
   - `taxonomy_url(identifier: str) -> str | None` — `"CWE-79"` / `"CAPEC-63"` to a MITRE URL, `None` for an unrecognised scheme.
@@ -446,20 +453,23 @@ Write your report to the report file named in your dispatch, listing the
 files you touched, the commands you ran and their output. Return the short
 status contract only.
 
----
+______________________________________________________________________
 
 ### Task 3: The consequence tables, empty
 
 Scaffolding and the invariants, with no mappings yet. Splitting this from the mappings means the bijection tests exist and fail *before* 102 policy decisions land, so each mapping task has a gate.
 
 **Files:**
+
 - Modify: `http_security_test/catalog.py`
 - Modify: `http_security_test/findings.py`
 - Modify: `http_security_test/__init__.py`
 - Modify: `tests/test_headers.py`
 
 **Interfaces:**
+
 - Produces:
+
   - `catalog.Consequence` — `namedtuple("Consequence", "name taxonomy text")`, `taxonomy` a tuple of identifiers.
   - `catalog.CONSEQUENCES: dict[str, Consequence]` — eight slugs.
   - `findings.CODE_CONSEQUENCES: dict[str, tuple[str, ...]]` — every code to its slugs, `()` for none.
@@ -637,16 +647,18 @@ Write your report to the report file named in your dispatch, listing the
 files you touched, the commands you ran and their output. Return the short
 status contract only.
 
----
+______________________________________________________________________
 
 ### Task 4: Map the classic five
 
 CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy — the families where nearly every code carries a consequence.
 
 **Files:**
+
 - Modify: `http_security_test/findings.py` (`CODE_CONSEQUENCES`)
 
 **Interfaces:**
+
 - Consumes: `CODE_CONSEQUENCES` from Task 3.
 
 - [ ] **Step 1: Add the mappings**
@@ -722,13 +734,14 @@ Write your report to the report file named in your dispatch, listing the
 files you touched, the commands you ran and their output. Return the short
 status contract only.
 
----
+______________________________________________________________________
 
 ### Task 5: Map the cross-origin story
 
 CORS, the isolation family, Clear-Site-Data, X-Permitted-Cross-Domain-Policies, X-XSS-Protection. **This is the task with the surprising result** — read the codes' messages before accepting the mappings.
 
 **Files:**
+
 - Modify: `http_security_test/findings.py` (`CODE_CONSEQUENCES`)
 
 - [ ] **Step 1: Add the mappings**
@@ -806,13 +819,14 @@ Write your report to the report file named in your dispatch, listing the
 files you touched, the commands you ran and their output. Return the short
 status contract only.
 
----
+______________________________________________________________________
 
 ### Task 6: Map the rest, and every empty
 
 Permissions-Policy, Feature-Policy, Integrity-Policy, the reporting family, the legacy headers, `Content-Type`, `duplicate-headers`. Completing this makes both bijection tests pass.
 
 **Files:**
+
 - Modify: `http_security_test/findings.py` (`CODE_CONSEQUENCES`)
 
 - [ ] **Step 1: Add the mappings**
@@ -917,15 +931,17 @@ Write your report to the report file named in your dispatch, listing the
 files you touched, the commands you ran and their output. Return the short
 status contract only.
 
----
+______________________________________________________________________
 
 ### Task 7: The `CODE_TAXONOMY` overlay
 
 **Files:**
+
 - Modify: `http_security_test/findings.py`
 - Modify: `tests/test_headers.py`
 
 **Interfaces:**
+
 - Produces: `CODE_TAXONOMY: dict[str, tuple[str, ...]]` — **sparse**; `taxonomy(code)` returns the union of the code's slugs' identifiers and this overlay.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1041,16 +1057,19 @@ Write your report to the report file named in your dispatch, listing the
 files you touched, the commands you ran and their output. Return the short
 status contract only.
 
----
+______________________________________________________________________
 
 ### Task 8: The report schema
 
 **Files:**
+
 - Modify: `http_security_test/reporting.py`
 - Modify: `tests/test_headers.py`
 
 **Interfaces:**
+
 - Consumes: `consequences()`, `taxonomy()`, `CODE_HEADER`, `references.header_url`.
+
 - Produces: `finding_as_dict()` gains `consequences`; `report()` gains `response["references"]` = `{"headers": [...], "taxonomy": [...]}`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1203,14 +1222,18 @@ Write your report to the report file named in your dispatch, listing the
 files you touched, the commands you ran and their output. Return the short
 status contract only.
 
----
+______________________________________________________________________
 
 ### Task 9: Terminal and `explain`
 
 **Files:**
+
 - Modify: `http_security_test/cli/text.py:87-99`
+
 - Modify: `http_security_test/cli/commands.py:26-40`
+
 - Modify: `tests/test_cli_text.py`, `tests/test_cli_explain.py`
+
 - Regenerate: `tests/cli_terminal_snapshot.txt`
 
 - [ ] **Step 1: Write the failing tests**
@@ -1397,11 +1420,12 @@ Write your report to the report file named in your dispatch, listing the
 files you touched, the commands you ran and their output. Return the short
 status contract only.
 
----
+______________________________________________________________________
 
 ### Task 10: Documentation
 
 **Files:**
+
 - Modify: `CLAUDE.md`
 
 - [ ] **Step 1: Update the Layout section**
@@ -1427,8 +1451,11 @@ Add `consequences` and `references` to the example JSON, and one paragraph of ra
 Under "Deliberately decided":
 
 - CWE 4.20 has no weakness for MIME sniffing or XS-Leaks, and none written for permission delegation. Do not re-propose CWE ids as the consequence vocabulary.
+
 - A Pillar-level CWE is not a fallback: CWE-693 and CWE-284 are true of every finding here, so filling a gap with one makes it mean "unclassified".
+
 - Pick a CAPEC id by its CWE cross-reference, not by its name. Keyword matching was wrong three times in a dozen.
+
 - CWE's cookie coverage is rich — 1004, 1275, 614, 315, 539, 565, 784 — and maps onto the parked `Set-Cookie` prefix work.
 
 - [ ] **Step 4: Move the closed parked item**
@@ -1455,7 +1482,7 @@ Write your report to the report file named in your dispatch, listing the
 files you touched, the commands you ran and their output. Return the short
 status contract only.
 
----
+______________________________________________________________________
 
 ## Self-Review
 

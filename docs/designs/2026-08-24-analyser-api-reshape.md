@@ -269,12 +269,12 @@ The analyser is unopinionated about whether raw bytes are stored, and the CLI
 decides. What the analyser **does** owe the consumer is an honest statement of
 what the bytes are.
 
-| value | meaning | examples |
-|---|---|---|
-| `capture` | the bytes as they crossed the wire | Burp base64 export, pycurl header lines, scapy, a pcap |
-| `reconstructed` | reassembled from a parsed model | mitmproxy `assemble_response()`, h11 `send()`, our own `from_parts()`, **every HTTP/2 exchange** |
-| `redacted` | a reconstruction known to have had content removed | the sample Burp HTML scanner report |
-| absent | nothing available | anything built from a live library object |
+| value           | meaning                                            | examples                                                                                         |
+| --------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `capture`       | the bytes as they crossed the wire                 | Burp base64 export, pycurl header lines, scapy, a pcap                                           |
+| `reconstructed` | reassembled from a parsed model                    | mitmproxy `assemble_response()`, h11 `send()`, our own `from_parts()`, **every HTTP/2 exchange** |
+| `redacted`      | a reconstruction known to have had content removed | the sample Burp HTML scanner report                                                              |
+| absent          | nothing available                                  | anything built from a live library object                                                        |
 
 Per **message**, not per exchange: pycurl can hand over a captured response
 beside a reconstructed request.
@@ -283,12 +283,12 @@ beside a reconstructed request.
 
 Measured on the four libraries that can produce message bytes:
 
-| library | mechanism | fidelity |
-|---|---|---|
-| pycurl | `HEADERFUNCTION` — raw header lines, status line included, duplicates intact | a genuine capture |
-| scapy | `raw(pkt)` — byte-identical round trip, reason phrase, casing and order preserved | faithful |
-| mitmproxy | `http1.assemble_response()` | reconstruction — *injects* lowercased `content-length` |
-| h11 | `Connection.send()` | reconstruction — emits `HTTP/1.1 200 \r\n`, **reason phrase dropped**, header names lowercased |
+| library   | mechanism                                                                         | fidelity                                                                                       |
+| --------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| pycurl    | `HEADERFUNCTION` — raw header lines, status line included, duplicates intact      | a genuine capture                                                                              |
+| scapy     | `raw(pkt)` — byte-identical round trip, reason phrase, casing and order preserved | faithful                                                                                       |
+| mitmproxy | `http1.assemble_response()`                                                       | reconstruction — *injects* lowercased `content-length`                                         |
+| h11       | `Connection.send()`                                                               | reconstruction — emits `HTTP/1.1 200 \r\n`, **reason phrase dropped**, header names lowercased |
 
 And the version half: **an HTTP/2 exchange can never be a true wire capture in
 text form.** The start line does not exist on the wire and someone has to
@@ -343,21 +343,21 @@ Measured against a loopback server returning duplicate CSP and duplicate
 `Set-Cookie`, except `werkzeug` and `starlette`, whose header types were
 exercised on constructed pairs rather than a fetch.
 
-| library | duplicate-preserving accessor | `d[name]` returns |
-|---|---|---|
-| stdlib `HTTPMessage` | `.get_all()`, `.items()` | first |
-| urllib3 `HTTPHeaderDict` | `.getlist()`, `.items()` | comma-joined |
-| aiohttp `CIMultiDict` | `.getall()`, `.items()` | first |
-| werkzeug `Headers` | `.get_all()`, `.items()` | first |
-| starlette `Headers` | `.getlist()`, `.items()` | first |
-| httpx `Headers` | `.get_list()` | first |
-| tornado | `.get_list()` | first |
-| curl_cffi | `.get_list()` | first |
-| geventhttpclient | `.items()` | first |
-| **requests `CaseInsensitiveDict`** | **none — lost** | comma-joined |
-| **niquests** | `.raw.headers`, or `.oheaders` | comma-joined |
-| **httplib2 `Response`** | **none — a `dict` subclass** | comma-joined |
-| **scapy** | **none — named fields** | **last** |
+| library                            | duplicate-preserving accessor  | `d[name]` returns |
+| ---------------------------------- | ------------------------------ | ----------------- |
+| stdlib `HTTPMessage`               | `.get_all()`, `.items()`       | first             |
+| urllib3 `HTTPHeaderDict`           | `.getlist()`, `.items()`       | comma-joined      |
+| aiohttp `CIMultiDict`              | `.getall()`, `.items()`        | first             |
+| werkzeug `Headers`                 | `.get_all()`, `.items()`       | first             |
+| starlette `Headers`                | `.getlist()`, `.items()`       | first             |
+| httpx `Headers`                    | `.get_list()`                  | first             |
+| tornado                            | `.get_list()`                  | first             |
+| curl_cffi                          | `.get_list()`                  | first             |
+| geventhttpclient                   | `.items()`                     | first             |
+| **requests `CaseInsensitiveDict`** | **none — lost**                | comma-joined      |
+| **niquests**                       | `.raw.headers`, or `.oheaders` | comma-joined      |
+| **httplib2 `Response`**            | **none — a `dict` subclass**   | comma-joined      |
+| **scapy**                          | **none — named fields**        | **last**          |
 
 Five spellings for one operation, and four distinct wrong answers for the
 naive one. **Comma-joined is a fourth row for CLAUDE.md's header-mapping
@@ -388,13 +388,13 @@ over and we never guess.
 
 Not attribute lookup. The version field alone is encoded five ways:
 
-| library | value | means |
-|---|---|---|
-| httpx, geventhttpclient, mitmproxy | `'HTTP/1.1'` | wire token |
-| stdlib, requests, niquests, urllib3, httplib2 | `11` | int |
-| aiohttp | `HttpVersion(major=1, minor=1)` | namedtuple |
-| **pycurl, curl_cffi** | **`2`** | **HTTP/1.1** — `CurlHttpVersion.V1_1 == 2`, `V2_0 == 3`, `V3 == 30` |
-| tornado | *absent* | — |
+| library                                       | value                           | means                                                               |
+| --------------------------------------------- | ------------------------------- | ------------------------------------------------------------------- |
+| httpx, geventhttpclient, mitmproxy            | `'HTTP/1.1'`                    | wire token                                                          |
+| stdlib, requests, niquests, urllib3, httplib2 | `11`                            | int                                                                 |
+| aiohttp                                       | `HttpVersion(major=1, minor=1)` | namedtuple                                                          |
+| **pycurl, curl_cffi**                         | **`2`**                         | **HTTP/1.1** — `CurlHttpVersion.V1_1 == 2`, `V2_0 == 3`, `V3 == 30` |
+| tornado                                       | *absent*                        | —                                                                   |
 
 libcurl's `2` reads as "HTTP/2" and is not. That is the trap an adaptor exists
 to own, and it is libcurl's rather than curl_cffi's — pycurl reports it too.
@@ -503,15 +503,14 @@ strictly breaks the XML syntax"*.
 
 ## What moves out of `cli/exchange.py`
 
-`Exchange(kind, target, url, status, reason, headers, hops, raw_response,
-raw_request)` is a mixture of two things, and it is a mixture because the
+`Exchange(kind, target, url, status, reason, headers, hops, raw_response, raw_request)` is a mixture of two things, and it is a mixture because the
 analyser had nowhere to put its half.
 
-| field | goes to | why |
-|---|---|---|
-| `url`, `status`, `reason`, `headers`, `raw_*` | **analyser** | message facts |
-| `kind`, `target`, `hops` | **CLI** | run facts; they feed `source` in the envelope |
-| `Failure`, `FAILURE_KINDS` | **CLI** | run facts |
+| field                                         | goes to      | why                                           |
+| --------------------------------------------- | ------------ | --------------------------------------------- |
+| `url`, `status`, `reason`, `headers`, `raw_*` | **analyser** | message facts                                 |
+| `kind`, `target`, `hops`                      | **CLI**      | run facts; they feed `source` in the envelope |
+| `Failure`, `FAILURE_KINDS`                    | **CLI**      | run facts                                     |
 
 The rule, which is the documented output rule applied to the input:
 

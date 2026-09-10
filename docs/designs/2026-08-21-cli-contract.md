@@ -5,8 +5,7 @@ Design notes for the command-line tool. Agreed in session on 2026-08-21;
 
 The library has deliberately had no CLI and never fetches anything. Neither of
 those facts changes. What changes is that a `cli` subpackage is added beside the
-analyser, importing it and never imported by it, so that `import
-http_security_test` still pulls in no network code and the analysis engine still
+analyser, importing it and never imported by it, so that `import http_security_test` still pulls in no network code and the analysis engine still
 answers only "what is wrong with this response".
 
 `scan.py` at the repository root is the throwaway fetcher this replaces. It
@@ -92,8 +91,7 @@ two-letter binary is a bad thing to squat silently, and because it is
 self-documenting in a script someone else reads. Checked against Kali on
 2026-08-21: no current tool called `hst`.
 
-**Stdlib only** — `urllib`, `ssl`, `json`, `argparse`. So `pip install
-http-security-test` yields a working tool with zero dependencies, and `[preload]`
+**Stdlib only** — `urllib`, `ssl`, `json`, `argparse`. So `pip install http-security-test` yields a working tool with zero dependencies, and `[preload]`
 remains the only extra. There is deliberately **no `[cli]` extra**: an extra that
 installs nothing is a lie about the shape of the package.
 
@@ -155,8 +153,7 @@ directive:
 hst: error: argument verb: invalid choice: 'example.com' (choose from 'scan', 'explain')
 ```
 
-If the invalid verb contains a dot or `://`, append `did you mean: hst scan
-example.com`. Roughly six lines in `main()` before dispatch, careful not to
+If the invalid verb contains a dot or `://`, append `did you mean: hst scan example.com`. Roughly six lines in `main()` before dispatch, careful not to
 intercept `--help` or `--version`.
 
 ## `scan` — the flag surface
@@ -165,26 +162,26 @@ Positional: `URL...`, one or more. A bare host gets `https://` prepended; the
 tool never silently downgrades to plaintext. `-` as a target reads targets from
 stdin, one per line.
 
-| Flag | Default | vs. `scan.py` |
-|---|---|---|
-| `-H, --header 'Name: value'` | — | unchanged, repeatable |
-| `-A, --user-agent` | tool UA | unchanged |
-| `-X, --method` | `GET` | unchanged; help text corrected — the draft says "GET or HEAD" but accepts anything, and should keep accepting anything |
-| `-t, --timeout SECONDS` | `15` | unchanged |
-| `-k, --insecure` | off | unchanged |
-| `--proxy URL` | — | **new** |
-| `-n, --no-redirect` | off | unchanged |
-| `--scope PATTERN` | derived from targets | **new**, repeatable; quote the wildcard |
-| `--max-redirects N` | `10` | **new**; `_Chain` must also pin urllib's own `max_redirections` and `max_repeats` to it — see below |
-| `-o, --output FORMAT:PATH` | — | **new**, repeatable; replaces `-j` as the general mechanism |
-| `-oA, --output-all PREFIX` | — | **new** |
-| `-j, --json` | off | kept as sugar for `-o json:-`, and so suppresses the terminal report |
-| `--color {auto,always,never}` | `auto` | **new**; the draft hard-codes `isatty`, which loses colour through `less -R` |
-| `-q, --quiet` | off | unchanged — findings only, no inventories |
-| `-c, --codes` | off | unchanged — annotate each finding with its code and `data` |
-| `--min-level {note,warning,error}` | `note` | **new**, terminal only |
-| `--fail-on {never,note,warning,error}` | `never` | **new** |
-| `--raw` | off | unchanged, scary help text intact |
+| Flag                                   | Default              | vs. `scan.py`                                                                                                          |
+| -------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `-H, --header 'Name: value'`           | —                    | unchanged, repeatable                                                                                                  |
+| `-A, --user-agent`                     | tool UA              | unchanged                                                                                                              |
+| `-X, --method`                         | `GET`                | unchanged; help text corrected — the draft says "GET or HEAD" but accepts anything, and should keep accepting anything |
+| `-t, --timeout SECONDS`                | `15`                 | unchanged                                                                                                              |
+| `-k, --insecure`                       | off                  | unchanged                                                                                                              |
+| `--proxy URL`                          | —                    | **new**                                                                                                                |
+| `-n, --no-redirect`                    | off                  | unchanged                                                                                                              |
+| `--scope PATTERN`                      | derived from targets | **new**, repeatable; quote the wildcard                                                                                |
+| `--max-redirects N`                    | `10`                 | **new**; `_Chain` must also pin urllib's own `max_redirections` and `max_repeats` to it — see below                    |
+| `-o, --output FORMAT:PATH`             | —                    | **new**, repeatable; replaces `-j` as the general mechanism                                                            |
+| `-oA, --output-all PREFIX`             | —                    | **new**                                                                                                                |
+| `-j, --json`                           | off                  | kept as sugar for `-o json:-`, and so suppresses the terminal report                                                   |
+| `--color {auto,always,never}`          | `auto`               | **new**; the draft hard-codes `isatty`, which loses colour through `less -R`                                           |
+| `-q, --quiet`                          | off                  | unchanged — findings only, no inventories                                                                              |
+| `-c, --codes`                          | off                  | unchanged — annotate each finding with its code and `data`                                                             |
+| `--min-level {note,warning,error}`     | `note`               | **new**, terminal only                                                                                                 |
+| `--fail-on {never,note,warning,error}` | `never`              | **new**                                                                                                                |
+| `--raw`                                | off                  | unchanged, scary help text intact                                                                                      |
 
 Reserved on `scan`: `--all-hops`, `--probe LIST`, scope exclusions,
 `--include-report-only`,
@@ -234,12 +231,12 @@ Where the tool is allowed to wander is one concept, not two: a **scope**, given
 as a list of host patterns. There is no `--follow` mode enum; an earlier draft
 had one and every value of it turned out to be a pattern.
 
-| Instead of a mode | Write |
-|---|---|
-| don't follow at all | `-n` / `--no-redirect` |
-| the same host only | `--scope example.com` |
+| Instead of a mode   | Write                      |
+| ------------------- | -------------------------- |
+| don't follow at all | `-n` / `--no-redirect`     |
+| the same host only  | `--scope example.com`      |
 | host and subdomains | the default — type nothing |
-| follow anything | `--scope '*'` |
+| follow anything     | `--scope '*'`              |
 
 A **pattern** is an exact hostname (`example.com`) or a wildcard
 (`*.example.com`, or bare `*`). Patterns match the **hostname only** — never
@@ -257,6 +254,7 @@ Three rules, each pinned because ambiguity here is expensive:
   is a real engagement shape when the marketing site is out of scope. If the
   wildcard swallowed the apex, that case could not be expressed at all. The
   common case pays nothing, because the derived default supplies both.
+
 - **The default, when no `--scope` is given, is `{H, *.H}` for every target
   host `H`** — and it is **printed before the first request**:
 
@@ -266,6 +264,7 @@ Three rules, each pinned because ambiguity here is expensive:
 
   That line is the affordance the mode enum could not offer: the guard's
   decision is visible up front rather than inferred from a refusal later.
+
 - **An explicit `--scope` replaces the derived default, but every target's own
   host stays in scope regardless.** One rule and one exception, and the
   exception earns its keep: without it, `--scope '*.partner.com'` to allow an
@@ -295,8 +294,7 @@ the middle one is the default invocation:
   message, so a three-line English sentence with embedded newlines lands in
   `source.reason` in the evidence file.
 
-`_Chain.__init__` therefore sets `self.max_redirections = self.max_repeats =
-limit`. Our own check then always fires first and records a proper
+`_Chain.__init__` therefore sets `self.max_redirections = self.max_repeats = limit`. Our own check then always fires first and records a proper
 `max-redirects` refusal hop. This does hand loop protection entirely to
 `_Chain.limit` — which is correct, because it bounds total hops regardless of
 loop topology: `len(self.hops)` upper-bounds both of urllib's counters.
@@ -316,8 +314,7 @@ wants quoting. This is a UX warning about argv, not an analysis judgement, so
 it is not the kind of guessing this project refuses elsewhere. Help text
 carries the quotes in its example.
 
-A refused redirect is loud on stderr *and* recorded as a hop with `followed:
-false` and a `refused` reason. "The target tried to bounce us to
+A refused redirect is loud on stderr *and* recorded as a hop with `followed: false` and a `refused` reason. "The target tried to bounce us to
 `login.example.net`" is a fact worth keeping in an evidence file; a scope guard
 that silently stops is a mystery, and one that logs what it blocked is data.
 
@@ -398,12 +395,12 @@ the wrong one.
 
 A frozen contract.
 
-| Code | Meaning |
-|---|---|
-| `0` | Ran to completion; nothing met `--fail-on`. |
-| `1` | Findings at or above `--fail-on`. Reachable only when `--fail-on` is given. |
-| `2` | Usage error. |
-| `3` | Operational failure: at least one target could not be fetched. |
+| Code | Meaning                                                                     |
+| ---- | --------------------------------------------------------------------------- |
+| `0`  | Ran to completion; nothing met `--fail-on`.                                 |
+| `1`  | Findings at or above `--fail-on`. Reachable only when `--fail-on` is given. |
+| `2`  | Usage error.                                                                |
+| `3`  | Operational failure: at least one target could not be fetched.              |
 
 `2` is argparse's own convention and we do not fight it — verified 2026-08-21,
 `ArgumentParser.error()` exits 2.
@@ -439,9 +436,9 @@ Format names are a closed set. Given one `-o` argument:
 
 1. If it contains a colon **and the text before the first colon is a known
    format name**, that is the format and the remainder is the path.
-2. Otherwise the whole argument is a path, and the format comes from its
+1. Otherwise the whole argument is a path, and the format comes from its
    lowercased extension.
-3. If neither resolves, usage error naming both fixes.
+1. If neither resolves, usage error naming both fixes.
 
 `-o C:\out.json` is therefore safe: `C` is not a format name, so rule 1 does not
 fire and rule 2 reads `.json`.
@@ -450,12 +447,12 @@ fire and rule 2 reads `.json`.
 Windows-safe, and a future `-o c:report.csv` would break it silently. Write it
 into the format table's comment.
 
-| Format | Extension | Status |
-|---|---|---|
-| `text` | `.txt`, also accepts `.text` | v1 |
-| `json` | `.json` | v1 |
-| `sarif` | `.sarif` | reserved |
-| `ndjson` | `.ndjson` | reserved |
+| Format   | Extension                    | Status   |
+| -------- | ---------------------------- | -------- |
+| `text`   | `.txt`, also accepts `.text` | v1       |
+| `json`   | `.json`                      | v1       |
+| `sarif`  | `.sarif`                     | reserved |
+| `ndjson` | `.ndjson`                    | reserved |
 
 A reserved format is rejected with "not implemented yet", not "invalid choice" —
 a two-line difference that tells a user the feature is coming rather than that
@@ -522,8 +519,7 @@ with no unwrapping — which is the stated reason the `raw` blobs are carried at
 all.
 
 **`source` carries a `kind` discriminator**, and that is the file-input seam
-appearing in the data. A HAR result reads `{"kind": "har", "file":
-"capture.har", "entry": 12, "url": ..., "status": 200}` — same slot, different
+appearing in the data. A HAR result reads `{"kind": "har", "file": "capture.har", "entry": 12, "url": ..., "status": 200}` — same slot, different
 facts, nothing restructured. This is why it is not called `exchange` or `http`.
 It is also the cheap form of extensibility: **the polymorphism lives in the
 document, not in the call graph**, so a new source adds a `kind` value and a
@@ -605,8 +601,7 @@ Four things that are load-bearing:
 
 ### Deliberately absent
 
-**The command line.** Tempting for provenance, and it carries `-H 'Authorization:
-Bearer …'` and `--proxy http://user:pass@…`. Redacting means pattern-guessing at
+**The command line.** Tempting for provenance, and it carries `-H 'Authorization: Bearer …'` and `--proxy http://user:pass@…`. Redacting means pattern-guessing at
 secrets, which is the class of guess this codebase rejects — see the critique of
 `securityheaders`' `'session' in name`. The precise provenance record already
 exists: `--raw` gives the actual request head with an explicit credential
@@ -622,15 +617,15 @@ back and none of which is recorded outside `--raw`.
 observable, and it is what a calling tool needs in order to make the prediction
 itself.
 
-| Kind | Raised by |
-|---|---|
-| `dns` | `socket.gaierror` |
-| `refused` | `ConnectionRefusedError` |
-| `timeout` | `TimeoutError`, `socket.timeout` |
-| `reset` | `ConnectionResetError`, `http.client.RemoteDisconnected` |
-| `tls` | `ssl.SSLCertVerificationError` and other `ssl.SSLError` |
-| `protocol` | malformed status line, `http.client` parse errors |
-| `other` | anything else |
+| Kind       | Raised by                                                |
+| ---------- | -------------------------------------------------------- |
+| `dns`      | `socket.gaierror`                                        |
+| `refused`  | `ConnectionRefusedError`                                 |
+| `timeout`  | `TimeoutError`, `socket.timeout`                         |
+| `reset`    | `ConnectionResetError`, `http.client.RemoteDisconnected` |
+| `tls`      | `ssl.SSLCertVerificationError` and other `ssl.SSLError`  |
+| `protocol` | malformed status line, `http.client` parse errors        |
+| `other`    | anything else                                            |
 
 One exception-to-tag mapping, no flag surface, and it turns *"4840 targets
 failed"* into *"800 dns, 40 timeout"*, which is a different conclusion. It is
@@ -829,8 +824,7 @@ analysis policy, and it belongs on the other side of the boundary.
 - **No WAF or interstitial detection.** Heuristic, and this project does not
   guess.
 - **No scope exclusions (`!blog.example.com`) in v1.** The obvious next ask,
-  and deliberately deferred: it is one more syntax rule, and `--scope
-  example.com` already spells the coarse version of "the apex but not the
+  and deliberately deferred: it is one more syntax rule, and `--scope example.com` already spells the coarse version of "the apex but not the
   subdomains". Reserved.
 - **No request-body support (`-d`/`--data`) in v1.** It drags in content-type
   handling for a case that is rare when analysing response headers. Reserved.
