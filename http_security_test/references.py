@@ -76,13 +76,16 @@ _HTTP_DEV = (
 )
 
 # The only curated URLs in the package. Permanent by their publishers' written
-# policy, which is what earns them the exception -- do NOT read three entries as
-# licence to add a fourth because the table is still short. The distinction is
-# permanence, not brevity.
+# policy, which is what earns them the exception -- do NOT read a short table as
+# licence to add to it because there is room. The distinction is permanence, not
+# brevity, and Set-Cookie2 is what that reads like applied: RFC 2965 is as
+# permanent as 7469, while neither pattern above can resolve the header at all,
+# MDN's compat data carrying no entry for it and http.dev no page.
 _SPEC = {
     "Public-Key-Pins": "https://www.rfc-editor.org/rfc/rfc7469",
     "Public-Key-Pins-Report-Only": "https://www.rfc-editor.org/rfc/rfc7469",
     "P3P": "https://www.w3.org/TR/P3P",
+    "Set-Cookie2": "https://www.rfc-editor.org/rfc/rfc2965",
 }
 
 # One positive name-to-URL table, built once. Positive rather than a pair of

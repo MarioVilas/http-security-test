@@ -48,6 +48,7 @@ DEPRECATED_HEADERS = (
     "P3P",
     "Public-Key-Pins",
     "Public-Key-Pins-Report-Only",
+    "Set-Cookie2",
     "X-Content-Security-Policy",
     "X-DNS-Prefetch-Control",
     "X-Download-Options",
@@ -94,6 +95,22 @@ def _analyze_hpkp(value):
 
 def _analyze_hpkp_report_only(value):
     return [Finding("Public-Key-Pins-Report-Only", "hpkp-ro-deprecated")]
+
+
+def _analyze_sc2(value):
+    # The one member of this table that is a state management header rather
+    # than a security one, and it is here on two counts: a cookie carries the
+    # attributes half of this package's cookie analysis is about, and RFC 6265
+    # deprecated the header in April 2011, so a response still sending one is
+    # saying something about its configuration rather than about its cookies.
+    #
+    # The value is not parsed because nothing reads it. RFC 6265 moved RFC 2965
+    # to Historic and named this header in doing so, and the engines agree:
+    # Firefox and Chromium do not know the name at all, and WebKit knows it
+    # only in order to withhold it -- isCrossOriginSafeHeader returns false for
+    # Set-Cookie2 beside Set-Cookie, which is recognition for the purpose of
+    # stripping. A cookie no browser stores has no attributes worth judging.
+    return [Finding("Set-Cookie2", "sc2-deprecated")]
 
 
 def _analyze_xcsp(value):

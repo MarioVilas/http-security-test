@@ -357,6 +357,11 @@ MESSAGES = {
     "hpkp-ro-deprecated": (
         "present but every browser has removed key pinning, so nothing is measured and nothing is reported"
     ),
+    "sc2-deprecated": (
+        "present but RFC 6265 deprecated it in 2011 and no current browser "
+        "parses it; if the cookie is not also sent in a Set-Cookie header, "
+        "nothing stores it"
+    ),
     "xcsp-deprecated": (
         "present but no browser has read this header since Firefox 23; if it is the only policy sent, the page has none"
     ),

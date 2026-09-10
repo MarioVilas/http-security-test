@@ -457,6 +457,11 @@ ANALYZER_CASES = [
     ("P3P", 'CP="This is not a P3P policy!"', ["p3p-deprecated"]),
     ("X-Download-Options", "noopen", ["xdo-deprecated"]),
     ("Public-Key-Pins-Report-Only", 'pin-sha256="abc="', ["hpkp-ro-deprecated"]),
+    # RFC 6265 deprecated the header outright and no engine parses it, so the
+    # cookie inside decides nothing: the spec's own example and a garbage value
+    # earn exactly the same note.
+    ("Set-Cookie2", 'Customer="WILE_E_COYOTE"; Version="1"; Path="/acme"', ["sc2-deprecated"]),
+    ("Set-Cookie2", "not a cookie at all", ["sc2-deprecated"]),
     # the vendor-prefixed CSP spellings, unread since Firefox 23 / Chrome 25
     ("X-Content-Security-Policy", "default-src 'self'", ["xcsp-deprecated"]),
     ("X-WebKit-CSP", "default-src 'self'", ["xwkcsp-deprecated"]),
@@ -785,6 +790,16 @@ def test_x_dns_prefetch_control_is_inventoried_as_one_to_drop():
     assert "X-DNS-Prefetch-Control" in headers.DEPRECATED_HEADERS
     found = headers.inventory(_ex({"x-dns-prefetch-control": "off"}))["deprecated"]
     assert found == {"X-DNS-Prefetch-Control": "off"}
+
+
+def test_set_cookie2_is_inventoried_as_deprecated_and_is_not_a_cookie():
+    # The cookies table parses Set-Cookie and nothing else. A near-namesake no
+    # browser stores must not slip into it, or the report claims a cookie the
+    # client never kept -- and the two names are one character apart, which is
+    # exactly the distinction CLAUDE.md's naming rule was learned on.
+    found = headers.inventory(_ex({"set-cookie2": 'Customer="WILE_E_COYOTE"; Version="1"'}))
+    assert found["deprecated"] == {"Set-Cookie2": 'Customer="WILE_E_COYOTE"; Version="1"'}
+    assert found["cookies"] == []
 
 
 def test_integrity_policy_is_never_reported_missing():
@@ -1497,7 +1512,7 @@ def test_severity_values_match_the_documented_policy():
     # The completeness tests above check only which codes are rated. These
     # anchor what they are rated, so a flipped value cannot land silently.
     counts = collections.Counter(headers.FINDING_SEVERITY.values())
-    assert counts == {"error": 48, "warning": 26, "note": 44}
+    assert counts == {"error": 48, "warning": 26, "note": 45}
     # An explicitly-defaulted header is rated exactly as its absence is, so
     # neither spelling of the same posture reads better than the other
     assert (

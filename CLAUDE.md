@@ -921,6 +921,30 @@ broken by an agent that had read the section and filed it under taste.
   moved, because the verdict never depended on how many engines honour it —
   only on `on` being the default in all of them. If you find issue #201 again,
   this is the paragraph that already accounts for it.
+- **`Set-Cookie2` is in `DEPRECATED_HEADERS` although it is a state-management
+  header rather than a security one.** Added 2026-09-10, one `note`,
+  `sc2-deprecated`, value unparsed. That it is dead was not the hard part —
+  RFC 6265 §1 deprecates it by name in moving RFC 2965 to Historic, its IANA
+  registration reads `obsoleted` (`known-http-header-db`), and no engine parses
+  one: zero occurrences in Firefox `netwerk/cookie/` and Chromium
+  `net/cookies/`, while WebKit knows the name only in order to withhold it
+  (`HTTPParsers.cpp:917` returns false for it from `isCrossOriginSafeHeader`,
+  beside `Set-Cookie`). The judgement was the placement, because `Set-Cookie`
+  itself is not in `SECURITY_HEADERS` — it earns its own inventory key — so the
+  table's "obsolete *security* headers" wording had to stretch. It stretches on
+  two counts, both the human's: a cookie carries the attributes half the cookie
+  analysis is about, and a response still sending this one is evidence nobody
+  has read that configuration since 2011, which is the parked hygiene axis in
+  miniature. The content decides nothing (principle 6), so the value is not
+  parsed and the spec's own example earns the same note as a garbage string.
+  **The BCD absence here cuts the opposite way from the CSPEE and
+  `Access-Control-Allow-Private-Network` rulings** and must not be read as
+  contradicting them: there, no BCD entry meant support and prevalence were
+  unmeasurable, so no code; here three independent sources positively assert
+  death. Ask which of the two you have before reusing either. `references.py`
+  gained its fourth `_SPEC` entry for the same reason — neither pattern source
+  documents the header — which is the permanence test that table's comment
+  names, not licence granted by a short table.
 - **`blocked-destinations=(style)` is treated as blocking nothing.** Chrome and
   Safari do not implement it and Firefox only behind
   `security.integrity_policy.stylesheet.enabled` (MDN BCD, matching OWASP's
@@ -1394,7 +1418,7 @@ sense `catalog.py` is:
 
 - `additional/insecure.txt` — **158 defect names over 93 distinct headers**,
   each written `Header: Defect` (`Access-Control-Allow-Origin: Unsafe Values`,
-  `Cache-Control: No Valid Directives`). This package has 118 codes over far
+  `Cache-Control: No Valid Directives`). This package has 119 codes over far
   fewer headers, so that file is a ready-made gap list. Read it for candidates,
   not as a specification, and rate anything taken from it by principle 3.
 - `additional/missing.txt` — the 14 headers humble reports as absent, against
@@ -1863,17 +1887,17 @@ Only the negatives that would otherwise look promising are kept:
 
 ## Status
 
-**Analyser:** 118 codes (48 error / 26 warning / 44 note), each with a rating, a
+**Analyser:** 119 codes (48 error / 26 warning / 45 note), each with a rating, a
 message template, a declared header and a consequence tuple — 73 codes carry at
-least one consequence slug, 45 carry `()`. Every rendered sentence is pinned by
+least one consequence slug, 46 carry `()`. Every rendered sentence is pinned by
 a snapshot. `CODE_HEADER` closes the parked code-to-header table:
 `test_the_declared_header_is_the_header_the_finding_carries` is what makes it
 stronger than the test it replaced, which could only prove the corpus was
 self-consistent — this one proves the package agrees with it.
 Ten consequence slugs live in `catalog.CONSEQUENCES`, a ten-entry
 `CODE_TAXONOMY` overlays specific published ids onto a handful of codes, and
-`references.py` resolves all 41 headers a finding names, plus the security,
-deprecated and caching inventories — 31 of them via MDN, 3 via a permanent
+`references.py` resolves all 42 headers a finding names, plus the security,
+deprecated and caching inventories — 31 of them via MDN, 4 via a permanent
 spec URL, 7 via http.dev. That is deliberately narrower than "or an inventory
 can name": `information` alone names 91 headers and none of them resolve.
 
@@ -1899,7 +1923,7 @@ the long-form descriptions to land with the SARIF writer's `fullDescription`
 field removed the only thing a verbosity switch would have gated — do not
 reserve one now.
 
-**Tests:** 913 passing across 535 test functions, 122 of them CLI. `ruff check`
+**Tests:** 916 passing across 536 test functions, 122 of them CLI. `ruff check`
 clean. No test touches the network, with one deliberate exception: the redirect-
 limit test binds a loopback `http.server` on an ephemeral port, because urllib's
 own redirect bookkeeping cannot be tested any other way.

@@ -158,6 +158,7 @@ rp-unsafe-url	Referrer-Policy	present but set to unsafe-url, which leaks the ful
 rt-endpoint-undeliverable	Report-To	present but the endpoint behind g is not a URL browsers deliver reports to -- it must be HTTPS, or a loopback address -- so anything reporting to that group is discarded
 rt-ineffective	Report-To	present on a response that did not arrive over HTTPS, where browsers ignore the header entirely, so every group it defines is undefined and no report of any kind is delivered
 rt-invalid	Report-To	present but its value is not the JSON the header is defined as carrying, so browsers read no endpoint group out of it at all
+sc2-deprecated	Set-Cookie2	present but RFC 6265 deprecated it in 2011 and no current browser parses it; if the cookie is not also sent in a Set-Cookie header, nothing stores it
 xcsp-deprecated	X-Content-Security-Policy	present but no browser has read this header since Firefox 23; if it is the only policy sent, the page has none
 xcto-invalid	X-Content-Type-Options	present but set to sniff rather than nosniff, so MIME type sniffing stays enabled
 xcto-missing	X-Content-Type-Options	missing

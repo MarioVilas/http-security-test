@@ -164,6 +164,7 @@ FINDING_SEVERITY = {
     "ip-style-unsupported": "note",
     "xdpc-nonstandard": "note",
     "hpkp-ro-deprecated": "note",
+    "sc2-deprecated": "note",
     "xcsp-deprecated": "note",
     "xwkcsp-deprecated": "note",
     "fp-conflicts": "note",
@@ -323,6 +324,8 @@ CODE_HEADER = {
     "cookie-samesite-none-insecure": "Set-Cookie",
     "cookie-secure-over-plaintext": "Set-Cookie",
     "cookie-unknown-attribute": "Set-Cookie",
+    # -- Set-Cookie2
+    "sc2-deprecated": "Set-Cookie2",
     # -- Strict-Transport-Security
     "hsts-malformed": "Strict-Transport-Security",
     "hsts-max-age-short": "Strict-Transport-Security",
@@ -501,6 +504,10 @@ CODE_CONSEQUENCES = {
     "hpkp-deprecated": (),  # browsers removed pinning; the pins bind nothing
     "hpkp-ro-deprecated": (),
     "p3p-deprecated": (),
+    # No browser stores the cookie, so nothing it could have carried -- a
+    # session token included -- is exposed by it. What the header costs its
+    # operator is the parked hygiene question, which is not this vocabulary.
+    "sc2-deprecated": (),
     "xdo-deprecated": (),
     "xdpc-nonstandard": (),  # `on` is the default everywhere it works
     # Ambiguity rather than a named risk: which value wins is client-specific,
