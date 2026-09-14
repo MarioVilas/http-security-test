@@ -493,7 +493,7 @@ separate branch would be dead code.
 
 **`report` holds what `report()` returned, unmutated.** Run facts live in the
 sibling `source` key. That is what lets *"a response does not know where it came
-from"* stay literally true instead of being worked around, and it keeps the two
+from"* stay true instead of being worked around, and it keeps the two
 contracts separable: `schema` versions the wrapper, `tool.version` versions the
 contents. The throwaway `scan.py` used to splice `result["url"] = final` into
 the document and label it "not part of the schema"; that hack is gone.
